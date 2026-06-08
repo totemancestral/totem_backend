@@ -1,5 +1,5 @@
-import { z } from 'zod';
-import { CheckoutMetadata, QuestionnaireAnswer, TotemTextPayload } from './totem.types';
+import { z } from "zod";
+import { CheckoutMetadata, QuestionnaireAnswer, TotemTextPayload } from "./totem.types";
 
 const answerSchema = z.object({
   questionId: z.string().min(1).max(80),
@@ -14,23 +14,36 @@ const metadataSchema = z
   .object({
     userId: z.string().min(1).max(120),
     email: z.string().email().optional(),
+    prenom: z.string().min(1).max(120).optional(),
     locale: z.string().min(2).max(12).optional(),
+    offre: z.enum(["origine", "ancestral", "famille"]).optional(),
+    offer: z.enum(["origine", "ancestral", "famille"]).optional(),
+    checkoutSessionId: z.string().min(1).max(120).optional(),
     answers: z.string().optional(),
   })
   .passthrough();
 
 export const checkoutSessionSchema = z.object({
   id: z.string().min(1),
-  object: z.literal('checkout.session'),
+  object: z.literal("checkout.session"),
   payment_status: z.string().min(1),
   metadata: z.record(z.string()).nullable().optional(),
   customer_email: z.string().email().nullable().optional(),
   customer_details: z
     .object({
       email: z.string().email().nullable().optional(),
+      name: z.string().nullable().optional(),
+      address: z
+        .object({
+          country: z.string().nullable().optional(),
+        })
+        .nullable()
+        .optional(),
     })
     .nullable()
     .optional(),
+  amount_total: z.number().int().nullable().optional(),
+  currency: z.string().nullable().optional(),
   payment_intent: z
     .union([z.string(), z.object({ id: z.string() })])
     .nullable()
@@ -38,6 +51,18 @@ export const checkoutSessionSchema = z.object({
 });
 
 export type CheckoutSessionPayload = z.infer<typeof checkoutSessionSchema>;
+
+export const paymentIntentSchema = z.object({
+  id: z.string().min(1),
+  object: z.literal("payment_intent"),
+  status: z.string().min(1),
+  metadata: z.record(z.string()).nullable().optional(),
+  amount: z.number().int().optional(),
+  amount_received: z.number().int().optional(),
+  currency: z.string().nullable().optional(),
+});
+
+export type PaymentIntentPayload = z.infer<typeof paymentIntentSchema>;
 
 export const textPayloadSchema = z
   .object({
@@ -52,13 +77,15 @@ export const textPayloadSchema = z
     prompt_image: z.string().min(1).optional(),
     imagePrompt: z.string().min(1).optional(),
   })
-  .transform((value): TotemTextPayload => ({
-    archetypeId: value.archetypeId ?? value.archetype_id ?? '',
-    ancestralName: value.ancestralName ?? value.nom_ancestral ?? '',
-    parchmentText: value.parchmentText ?? value.texte_parchemin ?? '',
-    audioMessage: value.audioMessage ?? value.message_audio ?? '',
-    imagePrompt: value.imagePrompt ?? value.prompt_image ?? '',
-  }))
+  .transform(
+    (value): TotemTextPayload => ({
+      archetypeId: value.archetypeId ?? value.archetype_id ?? "",
+      ancestralName: value.ancestralName ?? value.nom_ancestral ?? "",
+      parchmentText: value.parchmentText ?? value.texte_parchemin ?? "",
+      audioMessage: value.audioMessage ?? value.message_audio ?? "",
+      imagePrompt: value.imagePrompt ?? value.prompt_image ?? "",
+    }),
+  )
   .pipe(
     z.object({
       archetypeId: z.string().min(1),
@@ -79,13 +106,16 @@ export function parseCheckoutMetadata(
   return {
     userId: metadata.userId,
     email: metadata.email ?? fallbackEmail,
+    prenom: metadata.prenom,
     locale: metadata.locale,
+    offer: metadata.offer ?? metadata.offre,
+    checkoutSessionId: metadata.checkoutSessionId,
     answers,
   };
 }
 
 function parseAnswers(metadata: Record<string, unknown>): QuestionnaireAnswer[] {
-  if (typeof metadata.answers === 'string') {
+  if (typeof metadata.answers === "string") {
     const parsed = JSON.parse(metadata.answers) as unknown;
     const compact = compactAnswersSchema.safeParse(parsed);
 

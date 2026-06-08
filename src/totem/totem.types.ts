@@ -6,7 +6,10 @@ export type QuestionnaireAnswer = {
 export type CheckoutMetadata = {
   userId: string;
   email?: string;
+  prenom?: string;
   locale?: string;
+  offer?: "origine" | "ancestral" | "famille";
+  checkoutSessionId?: string;
   answers: QuestionnaireAnswer[];
 };
 

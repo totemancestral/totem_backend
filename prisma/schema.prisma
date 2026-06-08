@@ -14,33 +14,78 @@ enum TotemOrderStatus {
   error
 }
 
+enum TotemOffer {
+  origine
+  ancestral
+  famille
+}
+
+enum TotemPipelineStep {
+  texte
+  image
+  audio
+  pdf
+  upload
+  email
+  pipeline
+}
+
 model TotemOrder {
-  id                String           @id @default(cuid())
-  userId            String
-  customerEmail     String?
-  checkoutSessionId String           @unique
-  paymentIntentId   String?
-  status            TotemOrderStatus @default(pending)
-  locale            String?
-  answers           Json
-  textPayload       Json?
-  archetypeId       String?
-  ancestralName     String?
-  imageKey          String?
-  audioKey          String?
-  pdfKey            String?
-  imageUrl          String?
-  audioUrl          String?
-  pdfUrl            String?
-  errorMessage      String?
-  attempts          Int              @default(0)
-  queuedAt          DateTime?
-  processingAt      DateTime?
-  completedAt       DateTime?
+  id                  String               @id @default(cuid())
+  userId              String
+  customerEmail       String?
+  customerName        String?
+  checkoutSessionId   String               @unique
+  paymentIntentId     String?              @unique
+  status              TotemOrderStatus     @default(pending)
+  locale              String?
+  offer               TotemOffer           @default(ancestral)
+  amountCents         Int?
+  currency            String?
+  country             String?
+  answers             Json
+  textPayload         Json?
+  archetypeId         String?
+  ancestralName       String?
+  imageKey            String?
+  audioKey            String?
+  pdfKey              String?
+  parchmentKey        String?
+  certificateKey      String?
+  imageUrl            String?
+  audioUrl            String?
+  pdfUrl              String?
+  parchmentUrl        String?
+  certificateUrl      String?
+  errorMessage        String?
+  attempts            Int                  @default(0)
+  queuedAt            DateTime?
+  processingAt        DateTime?
+  completedAt         DateTime?
   deliveryEmailSentAt DateTime?
-  createdAt         DateTime         @default(now())
-  updatedAt         DateTime         @updatedAt
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+  pipelineErrors      TotemPipelineError[]
 
   @@index([userId, status])
   @@index([status, createdAt])
+  @@index([offer, createdAt])
+  @@index([country])
+}
+
+model TotemPipelineError {
+  id         String            @id @default(cuid())
+  orderId    String
+  step       TotemPipelineStep @default(pipeline)
+  code       String?
+  message    String
+  attempts   Int
+  resolved   Boolean           @default(false)
+  resolvedAt DateTime?
+  createdAt  DateTime          @default(now())
+
+  order TotemOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([resolved, createdAt])
 }

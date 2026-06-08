@@ -1,13 +1,13 @@
-import { Processor, WorkerHost } from '@nestjs/bullmq';
-import { Injectable } from '@nestjs/common';
-import { Prisma, TotemOrder, TotemOrderStatus } from '@prisma/client';
-import { Job } from 'bullmq';
-import { PrismaService } from '../prisma/prisma.service';
-import { TOTEM_QUEUE } from './totem.constants';
-import { BrevoMailerService } from './brevo-mailer.service';
-import { R2StorageService } from './r2-storage.service';
-import { TotemMicroservicesClient } from './totem-microservices.client';
-import { QuestionnaireAnswer, TotemJobPayload } from './totem.types';
+import { Processor, WorkerHost } from "@nestjs/bullmq";
+import { Injectable } from "@nestjs/common";
+import { Prisma, TotemOrder, TotemOrderStatus } from "@prisma/client";
+import { Job } from "bullmq";
+import { PrismaService } from "../prisma/prisma.service";
+import { TOTEM_QUEUE } from "./totem.constants";
+import { BrevoMailerService } from "./brevo-mailer.service";
+import { R2StorageService } from "./r2-storage.service";
+import { TotemMicroservicesClient } from "./totem-microservices.client";
+import { QuestionnaireAnswer, TotemJobPayload } from "./totem.types";
 
 const workerConcurrency = readWorkerConcurrency();
 
@@ -71,14 +71,14 @@ export class TotemWorker extends WorkerHost {
             archetypeId: text.archetypeId,
             prompt: text.imagePrompt,
           })
-          .then((artefact) => this.storage.store(order.id, 'image', artefact)),
+          .then((artefact) => this.storage.store(order.id, "image", artefact)),
         this.microservices
           .generateAudio({
             orderId: order.id,
             archetypeId: text.archetypeId,
             text: text.audioMessage,
           })
-          .then((artefact) => this.storage.store(order.id, 'audio', artefact)),
+          .then((artefact) => this.storage.store(order.id, "audio", artefact)),
         this.microservices
           .generatePdf({
             orderId: order.id,
@@ -87,7 +87,7 @@ export class TotemWorker extends WorkerHost {
             text,
             answers,
           })
-          .then((artefact) => this.storage.store(order.id, 'pdf', artefact)),
+          .then((artefact) => this.storage.store(order.id, "pdf", artefact)),
       ]);
 
       const completedOrder = await this.prisma.totemOrder.update({
@@ -97,9 +97,13 @@ export class TotemWorker extends WorkerHost {
           imageKey: image.key,
           audioKey: audio.key,
           pdfKey: pdf.key,
+          parchmentKey: pdf.key,
+          certificateKey: pdf.key,
           imageUrl: image.url,
           audioUrl: audio.url,
           pdfUrl: pdf.url,
+          parchmentUrl: pdf.url,
+          certificateUrl: pdf.url,
           completedAt: new Date(),
           errorMessage: null,
         },
@@ -128,7 +132,7 @@ export class TotemWorker extends WorkerHost {
     }
 
     if (!order.imageUrl || !order.audioUrl || !order.pdfUrl) {
-      throw new Error('delivery_urls_missing');
+      throw new Error("delivery_urls_missing");
     }
 
     await this.mailer.sendDelivery({
@@ -144,10 +148,7 @@ export class TotemWorker extends WorkerHost {
     });
   }
 
-  private async registerFailure(
-    job: Job<TotemJobPayload>,
-    error: unknown,
-  ): Promise<void> {
+  private async registerFailure(job: Job<TotemJobPayload>, error: unknown): Promise<void> {
     const message = normalizeError(error);
     const attempts = job.attemptsMade + 1;
     const maxAttempts = job.opts.attempts ?? 1;
@@ -159,6 +160,15 @@ export class TotemWorker extends WorkerHost {
         status: finalAttempt ? TotemOrderStatus.error : TotemOrderStatus.pending,
         attempts,
         errorMessage: message,
+      },
+    });
+
+    await this.prisma.totemPipelineError.create({
+      data: {
+        orderId: job.data.orderId,
+        step: "pipeline",
+        message,
+        attempts,
       },
     });
 
