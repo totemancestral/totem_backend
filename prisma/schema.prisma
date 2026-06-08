@@ -1,0 +1,46 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TotemOrderStatus {
+  pending
+  processing
+  done
+  error
+}
+
+model TotemOrder {
+  id                String           @id @default(cuid())
+  userId            String
+  customerEmail     String?
+  checkoutSessionId String           @unique
+  paymentIntentId   String?
+  status            TotemOrderStatus @default(pending)
+  locale            String?
+  answers           Json
+  textPayload       Json?
+  archetypeId       String?
+  ancestralName     String?
+  imageKey          String?
+  audioKey          String?
+  pdfKey            String?
+  imageUrl          String?
+  audioUrl          String?
+  pdfUrl            String?
+  errorMessage      String?
+  attempts          Int              @default(0)
+  queuedAt          DateTime?
+  processingAt      DateTime?
+  completedAt       DateTime?
+  deliveryEmailSentAt DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@index([userId, status])
+  @@index([status, createdAt])
+}
