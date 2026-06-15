@@ -112,11 +112,16 @@ export class SupabaseMirrorService {
       .maybeSingle();
     if (existingError) throw new Error(`supabase_oeuvre_lookup_failed:${existingError.message}`);
 
-    const result = existing
-      ? await this.supabase.from("oeuvres").update(oeuvre).eq("id", existing.id)
-      : await this.supabase.from("oeuvres").insert(oeuvre);
+    const oeuvreId = existing
+      ? await this.updateOeuvre(existing.id as string, oeuvre)
+      : await this.insertOeuvre(oeuvre);
 
-    if (result.error) throw new Error(`supabase_oeuvre_mirror_failed:${result.error.message}`);
+    await this.ensureInitialVersion({
+      oeuvreId,
+      userId: input.order.userId,
+      text: input.text,
+      image: input.image,
+    });
 
     const { error } = await this.supabase
       .from("commandes")
@@ -167,6 +172,54 @@ export class SupabaseMirrorService {
 
     if (error || !data) throw new Error(`supabase_command_create_failed:${error?.message}`);
     return data.id as string;
+  }
+
+  private async insertOeuvre(oeuvre: Record<string, unknown>): Promise<string> {
+    const { data, error } = await this.supabase.from("oeuvres").insert(oeuvre).select("id").single();
+
+    if (error || !data) throw new Error(`supabase_oeuvre_mirror_failed:${error?.message}`);
+    return data.id as string;
+  }
+
+  private async updateOeuvre(id: string, oeuvre: Record<string, unknown>): Promise<string> {
+    const { error } = await this.supabase.from("oeuvres").update(oeuvre).eq("id", id);
+
+    if (error) throw new Error(`supabase_oeuvre_mirror_failed:${error.message}`);
+    return id;
+  }
+
+  private async ensureInitialVersion(input: {
+    oeuvreId: string;
+    userId: string;
+    text: TotemTextPayload;
+    image: StoredArtefact;
+  }): Promise<void> {
+    const { data: existing, error: lookupError } = await this.supabase
+      .from("oeuvre_versions")
+      .select("id")
+      .eq("oeuvre_id", input.oeuvreId)
+      .eq("version", 1)
+      .eq("type", "full")
+      .maybeSingle();
+
+    if (lookupError) throw new Error(`supabase_version_lookup_failed:${lookupError.message}`);
+
+    const version = {
+      oeuvre_id: input.oeuvreId,
+      user_id: input.userId,
+      version: 1,
+      type: "full",
+      recit: input.text.parchmentText,
+      nom_totem: input.text.ancestralName,
+      image_url: input.image.url,
+      is_current: true,
+    };
+
+    const result = existing
+      ? await this.supabase.from("oeuvre_versions").update(version).eq("id", existing.id)
+      : await this.supabase.from("oeuvre_versions").insert(version);
+
+    if (result.error) throw new Error(`supabase_version_mirror_failed:${result.error.message}`);
   }
 
   private async findCommandId(

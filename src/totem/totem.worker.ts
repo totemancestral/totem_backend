@@ -123,17 +123,7 @@ export class TotemWorker extends WorkerHost {
         pdf,
       });
 
-      await this.mailer.sendDelivery({
-        order: completedOrder,
-        imageUrl: image.url,
-        audioUrl: audio.url,
-        pdfUrl: pdf.url,
-      });
-
-      await this.prisma.totemOrder.update({
-        where: { id: order.id },
-        data: { deliveryEmailSentAt: new Date() },
-      });
+      await this.sendDeliveryBestEffort(completedOrder, image.url, audio.url, pdf.url);
     } catch (error) {
       await this.registerFailure(job, error);
       throw error;
@@ -149,17 +139,39 @@ export class TotemWorker extends WorkerHost {
       throw new Error("delivery_urls_missing");
     }
 
-    await this.mailer.sendDelivery({
-      order,
-      imageUrl: order.imageUrl,
-      audioUrl: order.audioUrl,
-      pdfUrl: order.pdfUrl,
-    });
+    await this.sendDeliveryBestEffort(order, order.imageUrl, order.audioUrl, order.pdfUrl);
+  }
 
-    await this.prisma.totemOrder.update({
-      where: { id: order.id },
-      data: { deliveryEmailSentAt: new Date() },
-    });
+  private async sendDeliveryBestEffort(
+    order: TotemOrder,
+    imageUrl: string,
+    audioUrl: string,
+    pdfUrl: string,
+  ): Promise<void> {
+    try {
+      const sent = await this.mailer.sendDelivery({
+        order,
+        imageUrl,
+        audioUrl,
+        pdfUrl,
+      });
+
+      if (!sent) return;
+
+      await this.prisma.totemOrder.update({
+        where: { id: order.id },
+        data: { deliveryEmailSentAt: new Date() },
+      });
+    } catch (error) {
+      await this.prisma.totemPipelineError.create({
+        data: {
+          orderId: order.id,
+          step: "email",
+          message: normalizeError(error),
+          attempts: 1,
+        },
+      });
+    }
   }
 
   private async registerFailure(job: Job<TotemJobPayload>, error: unknown): Promise<void> {

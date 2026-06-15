@@ -23,11 +23,15 @@ export class ResendMailerService {
     this.alertEmail = config.get<string>('ALERT_EMAIL');
   }
 
-  async sendDelivery(payload: DeliveryPayload): Promise<void> {
+  async sendDelivery(payload: DeliveryPayload): Promise<boolean> {
     const email = payload.order.customerEmail;
 
     if (!email) {
-      throw new Error('customer_email_missing');
+      return false;
+    }
+
+    if (!this.senderEmail) {
+      return false;
     }
 
     await this.send({
@@ -35,6 +39,8 @@ export class ResendMailerService {
       subject: 'Votre coffret TOTEM ANCESTRAL est pret',
       html: renderDeliveryEmail(payload),
     });
+
+    return true;
   }
 
   async sendFailureAlert(orderId: string, error: string): Promise<void> {
@@ -52,10 +58,6 @@ export class ResendMailerService {
     subject: string;
     html: string;
   }): Promise<void> {
-    if (!this.senderEmail) {
-      throw new Error('resend_sender_email_missing');
-    }
-
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
