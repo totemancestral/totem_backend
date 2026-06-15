@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { Prisma, TotemOrderStatus } from "@prisma/client";
 import Stripe from "stripe";
 import { PrismaService } from "../prisma/prisma.service";
+import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemQueueService } from "./totem-queue.service";
 import {
   CheckoutSessionPayload,
@@ -22,6 +23,7 @@ export class StripeWebhookService {
     config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly queue: TotemQueueService,
+    private readonly mirror: SupabaseMirrorService,
   ) {
     this.stripe = new Stripe(config.getOrThrow<string>("STRIPE_SECRET_KEY"));
     this.webhookSecret = config.getOrThrow<string>("STRIPE_WEBHOOK_SECRET");
@@ -48,11 +50,38 @@ export class StripeWebhookService {
     }
 
     const fallbackEmail = session.customer_details?.email ?? session.customer_email ?? undefined;
-    const metadata = this.readMetadata(session.metadata, fallbackEmail);
     const paymentIntentId =
       typeof session.payment_intent === "string"
         ? session.payment_intent
         : session.payment_intent?.id;
+
+    if (session.metadata?.orderId) {
+      const order = await this.activatePrecreatedOrder({
+        orderId: session.metadata.orderId,
+        userId: session.metadata.userId,
+        checkoutSessionId: session.id,
+        paymentIntentId,
+        amountCents: session.amount_total ?? undefined,
+        currency: session.currency ?? undefined,
+        country: session.customer_details?.address?.country ?? undefined,
+        customerEmail: fallbackEmail,
+        customerName: session.metadata.prenom ?? session.customer_details?.name ?? undefined,
+      });
+
+      await this.mirror.markPaid({
+        order,
+        externalCommandId: session.metadata.externalCommandId ?? session.metadata.commande_id,
+        paymentIntentId,
+        amountCents: session.amount_total ?? undefined,
+        currency: session.currency ?? undefined,
+        country: session.customer_details?.address?.country ?? undefined,
+      });
+
+      await this.enqueueIfPending(order.id);
+      return;
+    }
+
+    const metadata = this.readMetadata(session.metadata, fallbackEmail);
 
     const order = await this.createOrderIfNeeded({
       metadata,
@@ -64,6 +93,15 @@ export class StripeWebhookService {
       customerName: metadata.prenom ?? session.customer_details?.name ?? undefined,
     });
 
+    await this.mirror.markPaid({
+      order,
+      externalCommandId: metadata.externalCommandId,
+      paymentIntentId,
+      amountCents: session.amount_total ?? undefined,
+      currency: session.currency ?? undefined,
+      country: session.customer_details?.address?.country ?? undefined,
+    });
+
     await this.enqueueIfPending(order.id);
   }
 
@@ -71,6 +109,33 @@ export class StripeWebhookService {
     const intent = this.readPaymentIntent(payload);
 
     if (intent.status !== "succeeded") {
+      return;
+    }
+
+    if (intent.metadata?.orderId) {
+      const order = await this.activatePrecreatedOrder({
+        orderId: intent.metadata.orderId,
+        userId: intent.metadata.userId,
+        paymentIntentId: intent.id,
+        amountCents: intent.amount_received ?? intent.amount,
+        currency: intent.currency ?? undefined,
+        customerEmail: intent.metadata.email,
+        customerName: intent.metadata.prenom,
+      });
+
+      await this.mirror.markPaid({
+        order,
+        externalCommandId: intent.metadata.externalCommandId ?? intent.metadata.commande_id,
+        paymentIntentId: intent.id,
+        amountCents: intent.amount_received ?? intent.amount,
+        currency: intent.currency ?? undefined,
+      });
+
+      await this.enqueueIfPending(order.id);
+      return;
+    }
+
+    if (!this.hasCompleteCheckoutMetadata(intent.metadata)) {
       return;
     }
 
@@ -84,6 +149,14 @@ export class StripeWebhookService {
       amountCents: intent.amount_received ?? intent.amount,
       currency: intent.currency ?? undefined,
       customerName: metadata.prenom,
+    });
+
+    await this.mirror.markPaid({
+      order,
+      externalCommandId: metadata.externalCommandId,
+      paymentIntentId: intent.id,
+      amountCents: intent.amount_received ?? intent.amount,
+      currency: intent.currency ?? undefined,
     });
 
     await this.enqueueIfPending(order.id);
@@ -174,6 +247,67 @@ export class StripeWebhookService {
         },
       });
     });
+  }
+
+  private async activatePrecreatedOrder(input: {
+    orderId: string;
+    userId?: string;
+    checkoutSessionId?: string;
+    paymentIntentId?: string;
+    amountCents?: number;
+    currency?: string;
+    country?: string;
+    customerEmail?: string;
+    customerName?: string;
+  }) {
+    return this.prisma.$transaction(async (tx) => {
+      const existing = await tx.totemOrder.findUnique({
+        where: { id: input.orderId },
+      });
+
+      if (!existing) {
+        throw new BadRequestException("order_not_found");
+      }
+
+      if (input.userId && existing.userId !== input.userId) {
+        throw new BadRequestException("order_user_mismatch");
+      }
+
+      if (input.checkoutSessionId && existing.checkoutSessionId !== input.checkoutSessionId) {
+        throw new BadRequestException("checkout_session_mismatch");
+      }
+
+      if (
+        input.paymentIntentId &&
+        existing.paymentIntentId &&
+        existing.paymentIntentId !== input.paymentIntentId
+      ) {
+        throw new BadRequestException("payment_intent_mismatch");
+      }
+
+      return tx.totemOrder.update({
+        where: { id: existing.id },
+        data: {
+          paymentIntentId: input.paymentIntentId ?? existing.paymentIntentId,
+          amountCents: input.amountCents ?? existing.amountCents,
+          currency: input.currency?.toUpperCase() ?? existing.currency,
+          country: input.country ?? existing.country,
+          customerEmail: existing.customerEmail ?? input.customerEmail,
+          customerName: existing.customerName ?? input.customerName,
+        },
+      });
+    });
+  }
+
+  private hasCompleteCheckoutMetadata(
+    metadata: Record<string, string> | null | undefined,
+  ): boolean {
+    if (!metadata) return false;
+    if (typeof metadata.answers === "string") return true;
+
+    return Array.from({ length: 10 }, (_, index) => `q${index + 1}`).every(
+      (key) => typeof metadata[key] === "string" && metadata[key].length > 0,
+    );
   }
 
   private async enqueueIfPending(orderId: string): Promise<void> {

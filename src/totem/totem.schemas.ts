@@ -19,6 +19,8 @@ const metadataSchema = z
     offre: z.enum(["origine", "ancestral", "famille"]).optional(),
     offer: z.enum(["origine", "ancestral", "famille"]).optional(),
     checkoutSessionId: z.string().min(1).max(120).optional(),
+    externalCommandId: z.string().min(1).max(120).optional(),
+    commande_id: z.string().min(1).max(120).optional(),
     answers: z.string().optional(),
   })
   .passthrough();
@@ -110,6 +112,7 @@ export function parseCheckoutMetadata(
     locale: metadata.locale,
     offer: metadata.offer ?? metadata.offre,
     checkoutSessionId: metadata.checkoutSessionId,
+    externalCommandId: metadata.externalCommandId ?? metadata.commande_id,
     answers,
   };
 }

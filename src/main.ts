@@ -11,6 +11,16 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   const config = app.get(ConfigService);
+  const corsOrigin = config.get<string>('CORS_ORIGIN');
+
+  if (corsOrigin) {
+    app.enableCors({
+      origin: corsOrigin.split(',').map((origin) => origin.trim()).filter(Boolean),
+      methods: ['GET', 'POST', 'OPTIONS'],
+      allowedHeaders: ['Authorization', 'Content-Type', 'Stripe-Signature'],
+    });
+  }
+
   await app.listen(config.getOrThrow<number>('PORT'));
 }
 

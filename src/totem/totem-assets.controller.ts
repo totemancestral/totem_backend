@@ -1,10 +1,10 @@
 import { Controller, Get, Param, Res } from '@nestjs/common';
 import { Response } from 'express';
-import { R2StorageService } from './r2-storage.service';
+import { SupabaseStorageService } from './supabase-storage.service';
 
 @Controller('totem-assets')
 export class TotemAssetsController {
-  constructor(private readonly storage: R2StorageService) {}
+  constructor(private readonly storage: SupabaseStorageService) {}
 
   @Get(':token')
   async read(@Param('token') token: string, @Res() response: Response): Promise<void> {

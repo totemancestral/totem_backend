@@ -4,8 +4,9 @@ import { Prisma, TotemOrder, TotemOrderStatus } from "@prisma/client";
 import { Job } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
 import { TOTEM_QUEUE } from "./totem.constants";
-import { BrevoMailerService } from "./brevo-mailer.service";
-import { R2StorageService } from "./r2-storage.service";
+import { ResendMailerService } from "./resend-mailer.service";
+import { SupabaseStorageService } from "./supabase-storage.service";
+import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemMicroservicesClient } from "./totem-microservices.client";
 import { QuestionnaireAnswer, TotemJobPayload } from "./totem.types";
 
@@ -20,8 +21,9 @@ export class TotemWorker extends WorkerHost {
   constructor(
     private readonly prisma: PrismaService,
     private readonly microservices: TotemMicroservicesClient,
-    private readonly storage: R2StorageService,
-    private readonly mailer: BrevoMailerService,
+    private readonly storage: SupabaseStorageService,
+    private readonly mirror: SupabaseMirrorService,
+    private readonly mailer: ResendMailerService,
   ) {
     super();
   }
@@ -46,6 +48,7 @@ export class TotemWorker extends WorkerHost {
           errorMessage: null,
         },
       });
+      await this.mirror.markProcessing(order);
 
       const answers = order.answers as unknown as QuestionnaireAnswer[];
       const text = await this.microservices.generateText({
@@ -107,6 +110,14 @@ export class TotemWorker extends WorkerHost {
           completedAt: new Date(),
           errorMessage: null,
         },
+      });
+
+      await this.mirror.markDelivered({
+        order: completedOrder,
+        text,
+        image,
+        audio,
+        pdf,
       });
 
       await this.mailer.sendDelivery({
@@ -171,6 +182,11 @@ export class TotemWorker extends WorkerHost {
         attempts,
       },
     });
+
+    const order = await this.prisma.totemOrder
+      .findUnique({ where: { id: job.data.orderId } })
+      .catch(() => null);
+    await this.mirror.markFailed(order, message).catch(() => undefined);
 
     if (finalAttempt) {
       await this.mailer.sendFailureAlert(job.data.orderId, message).catch(() => undefined);

@@ -3,13 +3,16 @@ export type QuestionnaireAnswer = {
   answer: string;
 };
 
+export type TotemOffer = "origine" | "ancestral" | "famille";
+
 export type CheckoutMetadata = {
   userId: string;
   email?: string;
   prenom?: string;
   locale?: string;
-  offer?: "origine" | "ancestral" | "famille";
+  offer?: TotemOffer;
   checkoutSessionId?: string;
+  externalCommandId?: string;
   answers: QuestionnaireAnswer[];
 };
 
