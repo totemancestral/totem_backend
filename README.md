@@ -71,6 +71,8 @@ Le depot contient `render.yaml` pour creer un Web Service Docker depuis Render.
 
 ## Variables de production
 
-Voir `.env.example`. Sur Railway ou Render, il faut au minimum configurer Stripe, Supabase, Redis, Resend et les URLs des microservices TOTEM.
+Voir `.env.example`. Sur Railway ou Render, il faut configurer Supabase, Redis,
+Anthropic, OpenAI et Resend. Stripe peut etre ajoute ensuite, mais les endpoints
+checkout et webhook resteront indisponibles tant que ses cles ne sont pas renseignees.
 
 Le webhook Stripe doit etre configure avec le secret `STRIPE_WEBHOOK_SECRET`. L'evenement principal est `checkout.session.completed`; `payment_intent.succeeded` est tolere pour compatibilite, mais le flux Checkout repose sur la session Stripe.

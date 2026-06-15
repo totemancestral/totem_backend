@@ -1,7 +1,10 @@
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { ConfigService } from '@nestjs/config';
+import WebSocket from 'ws';
 import { AppModule } from './app.module';
+
+globalThis.WebSocket ??= WebSocket as unknown as typeof globalThis.WebSocket;
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {

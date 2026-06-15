@@ -7,16 +7,18 @@ import { CheckoutController } from "./checkout.controller";
 import { CheckoutService } from "./checkout.service";
 import { TotemQueueService } from "./totem-queue.service";
 import { TotemWorker } from "./totem.worker";
-import { TotemMicroservicesClient } from "./totem-microservices.client";
+import { TotemAiService } from "./totem-ai.service";
 import { SupabaseStorageService } from "./supabase-storage.service";
 import { ResendMailerService } from "./resend-mailer.service";
 import { SupabaseAuthService } from "./supabase-auth.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemAssetsController } from "./totem-assets.controller";
 import { HealthController } from "../health.controller";
+import { PrismaModule } from "../prisma/prisma.module";
 
 @Module({
   imports: [
+    PrismaModule,
     BullModule.registerQueue({
       name: TOTEM_QUEUE,
       streams: {
@@ -37,7 +39,7 @@ import { HealthController } from "../health.controller";
     StripeWebhookService,
     TotemQueueService,
     TotemWorker,
-    TotemMicroservicesClient,
+    TotemAiService,
     SupabaseStorageService,
     ResendMailerService,
     SupabaseAuthService,

@@ -12,15 +12,15 @@ type DeliveryPayload = {
 @Injectable()
 export class ResendMailerService {
   private readonly apiKey: string;
-  private readonly senderEmail: string;
+  private readonly senderEmail?: string;
   private readonly senderName: string;
-  private readonly alertEmail: string;
+  private readonly alertEmail?: string;
 
   constructor(config: ConfigService) {
     this.apiKey = config.getOrThrow<string>('RESEND_API_KEY');
-    this.senderEmail = config.getOrThrow<string>('RESEND_SENDER_EMAIL');
+    this.senderEmail = config.get<string>('RESEND_SENDER_EMAIL');
     this.senderName = config.getOrThrow<string>('RESEND_SENDER_NAME');
-    this.alertEmail = config.getOrThrow<string>('ALERT_EMAIL');
+    this.alertEmail = config.get<string>('ALERT_EMAIL');
   }
 
   async sendDelivery(payload: DeliveryPayload): Promise<void> {
@@ -38,6 +38,8 @@ export class ResendMailerService {
   }
 
   async sendFailureAlert(orderId: string, error: string): Promise<void> {
+    if (!this.alertEmail) return;
+
     await this.send({
       to: [this.alertEmail],
       subject: `Erreur pipeline TOTEM ${orderId}`,
@@ -50,6 +52,10 @@ export class ResendMailerService {
     subject: string;
     html: string;
   }): Promise<void> {
+    if (!this.senderEmail) {
+      throw new Error('resend_sender_email_missing');
+    }
+
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {

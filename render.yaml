@@ -36,16 +36,18 @@ services:
         value: 8900
       - key: TOTEM_PRICE_FAMILLE_CENTS
         value: 19900
-      - key: TOTEM_TEXT_API_URL
+      - key: ANTHROPIC_API_KEY
         sync: false
-      - key: TOTEM_IMAGE_API_URL
+      - key: ANTHROPIC_MODEL
+        value: claude-opus-4-5
+      - key: OPENAI_API_KEY
         sync: false
-      - key: TOTEM_AUDIO_API_URL
-        sync: false
-      - key: TOTEM_PDF_API_URL
-        sync: false
-      - key: TOTEM_MICROSERVICE_API_KEY
-        sync: false
+      - key: OPENAI_IMAGE_MODEL
+        value: gpt-image-1
+      - key: OPENAI_TTS_MODEL
+        value: gpt-4o-mini-tts
+      - key: OPENAI_TTS_VOICE
+        value: onyx
       - key: SUPABASE_URL
         sync: false
       - key: SUPABASE_ANON_KEY

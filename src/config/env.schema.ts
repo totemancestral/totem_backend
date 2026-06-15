@@ -1,5 +1,15 @@
 import { z } from 'zod';
 
+const optionalString = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().min(1).optional(),
+);
+
+const optionalEmail = z.preprocess(
+  (value) => (value === '' ? undefined : value),
+  z.string().email().optional(),
+);
+
 export const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('production'),
   PORT: z.coerce.number().int().positive().default(3000),
@@ -7,13 +17,14 @@ export const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   TOTEM_WORKER_CONCURRENCY: z.coerce.number().int().positive().max(500).default(50),
-  STRIPE_SECRET_KEY: z.string().min(1),
-  STRIPE_WEBHOOK_SECRET: z.string().min(1),
-  TOTEM_TEXT_API_URL: z.string().url(),
-  TOTEM_IMAGE_API_URL: z.string().url(),
-  TOTEM_AUDIO_API_URL: z.string().url(),
-  TOTEM_PDF_API_URL: z.string().url(),
-  TOTEM_MICROSERVICE_API_KEY: z.string().min(1),
+  STRIPE_SECRET_KEY: optionalString,
+  STRIPE_WEBHOOK_SECRET: optionalString,
+  ANTHROPIC_API_KEY: z.string().min(1),
+  ANTHROPIC_MODEL: z.string().min(1).default('claude-opus-4-5'),
+  OPENAI_API_KEY: z.string().min(1),
+  OPENAI_IMAGE_MODEL: z.string().min(1).default('gpt-image-1'),
+  OPENAI_TTS_MODEL: z.string().min(1).default('gpt-4o-mini-tts'),
+  OPENAI_TTS_VOICE: z.string().min(1).default('onyx'),
   CHECKOUT_SUCCESS_URL: z.string().url(),
   CHECKOUT_CANCEL_URL: z.string().url(),
   TOTEM_PRICE_ORIGINE_CENTS: z.coerce.number().int().positive(),
@@ -25,8 +36,8 @@ export const envSchema = z.object({
   SUPABASE_STORAGE_BUCKET: z.string().min(1),
   DELIVERY_SIGNING_SECRET: z.string().min(32),
   RESEND_API_KEY: z.string().min(1),
-  RESEND_SENDER_EMAIL: z.string().email(),
+  RESEND_SENDER_EMAIL: optionalEmail,
   RESEND_SENDER_NAME: z.string().min(1),
-  ALERT_EMAIL: z.string().email(),
+  ALERT_EMAIL: optionalEmail,
   CORS_ORIGIN: z.string().optional(),
 });

@@ -1,4 +1,9 @@
-import { BadRequestException, Injectable, UnprocessableEntityException } from "@nestjs/common";
+import {
+  BadRequestException,
+  Injectable,
+  ServiceUnavailableException,
+  UnprocessableEntityException,
+} from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma, TotemOrderStatus } from "@prisma/client";
 import Stripe from "stripe";
@@ -16,8 +21,9 @@ import { CheckoutMetadata } from "./totem.types";
 
 @Injectable()
 export class StripeWebhookService {
-  private readonly stripe: Stripe;
-  private readonly webhookSecret: string;
+  private stripe?: Stripe;
+  private readonly stripeSecretKey?: string;
+  private readonly webhookSecret?: string;
 
   constructor(
     config: ConfigService,
@@ -25,8 +31,8 @@ export class StripeWebhookService {
     private readonly queue: TotemQueueService,
     private readonly mirror: SupabaseMirrorService,
   ) {
-    this.stripe = new Stripe(config.getOrThrow<string>("STRIPE_SECRET_KEY"));
-    this.webhookSecret = config.getOrThrow<string>("STRIPE_WEBHOOK_SECRET");
+    this.stripeSecretKey = config.get<string>("STRIPE_SECRET_KEY");
+    this.webhookSecret = config.get<string>("STRIPE_WEBHOOK_SECRET");
   }
 
   async handle(rawBody: Buffer, signature: string): Promise<void> {
@@ -163,14 +169,27 @@ export class StripeWebhookService {
   }
 
   private readVerifiedEvent(rawBody: Buffer, signature: string): Stripe.Event {
+    if (!this.webhookSecret) {
+      throw new ServiceUnavailableException("stripe_webhook_not_configured");
+    }
+
     try {
-      return this.stripe.webhooks.constructEvent(rawBody, signature, this.webhookSecret);
+      return this.readStripe().webhooks.constructEvent(rawBody, signature, this.webhookSecret);
     } catch (error) {
       throw new BadRequestException({
         code: "stripe_signature_invalid",
         detail: error instanceof Error ? error.message : "invalid_signature",
       });
     }
+  }
+
+  private readStripe(): Stripe {
+    if (!this.stripeSecretKey) {
+      throw new ServiceUnavailableException("stripe_not_configured");
+    }
+
+    this.stripe ??= new Stripe(this.stripeSecretKey);
+    return this.stripe;
   }
 
   private readCheckoutSession(payload: unknown): CheckoutSessionPayload {

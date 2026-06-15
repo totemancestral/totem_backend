@@ -7,7 +7,7 @@ import { TOTEM_QUEUE } from "./totem.constants";
 import { ResendMailerService } from "./resend-mailer.service";
 import { SupabaseStorageService } from "./supabase-storage.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
-import { TotemMicroservicesClient } from "./totem-microservices.client";
+import { TotemAiService } from "./totem-ai.service";
 import { QuestionnaireAnswer, TotemJobPayload } from "./totem.types";
 
 const workerConcurrency = readWorkerConcurrency();
@@ -20,7 +20,7 @@ const workerConcurrency = readWorkerConcurrency();
 export class TotemWorker extends WorkerHost {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly microservices: TotemMicroservicesClient,
+    private readonly generation: TotemAiService,
     private readonly storage: SupabaseStorageService,
     private readonly mirror: SupabaseMirrorService,
     private readonly mailer: ResendMailerService,
@@ -51,9 +51,10 @@ export class TotemWorker extends WorkerHost {
       await this.mirror.markProcessing(order);
 
       const answers = order.answers as unknown as QuestionnaireAnswer[];
-      const text = await this.microservices.generateText({
+      const text = await this.generation.generateText({
         orderId: order.id,
         userId: order.userId,
+        customerName: order.customerName,
         locale: order.locale,
         answers,
       });
@@ -68,25 +69,27 @@ export class TotemWorker extends WorkerHost {
       });
 
       const [image, audio, pdf] = await Promise.all([
-        this.microservices
+        this.generation
           .generateImage({
             orderId: order.id,
             archetypeId: text.archetypeId,
             prompt: text.imagePrompt,
           })
           .then((artefact) => this.storage.store(order.id, "image", artefact)),
-        this.microservices
+        this.generation
           .generateAudio({
             orderId: order.id,
             archetypeId: text.archetypeId,
             text: text.audioMessage,
           })
           .then((artefact) => this.storage.store(order.id, "audio", artefact)),
-        this.microservices
+        this.generation
           .generatePdf({
             orderId: order.id,
             userId: order.userId,
+            customerName: order.customerName,
             locale: order.locale,
+            offer: order.offer,
             text,
             answers,
           })

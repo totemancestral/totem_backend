@@ -3,7 +3,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { BullModule } from '@nestjs/bullmq';
 import { RedisOptions } from 'ioredis';
 import { envSchema } from './config/env.schema';
-import { PrismaModule } from './prisma/prisma.module';
 import { TotemModule } from './totem/totem.module';
 
 @Module({
@@ -18,7 +17,6 @@ import { TotemModule } from './totem/totem.module';
         connection: readRedisOptions(config.getOrThrow<string>('REDIS_URL')),
       }),
     }),
-    PrismaModule,
     TotemModule,
   ],
 })
