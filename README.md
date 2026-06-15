@@ -49,6 +49,18 @@ Variables a renseigner dans l'hebergeur: voir `TOTEM/.env.example` et
 `../docs/env.md`. Le frontend Next doit ensuite recevoir l'URL publique du
 backend dans `TOTEM_BACKEND_URL`.
 
+### Render
+
+Le depot contient `render.yaml` pour creer un Web Service Docker depuis Render.
+
+1. Render > New > Blueprint ou New > Web Service.
+2. Choisir le depot `REBCDR07/totem_backend`.
+3. Renseigner les variables marquees `sync: false` dans le dashboard Render.
+4. Mettre `PUBLIC_ASSET_BASE_URL` sur l'URL publique Render du backend.
+5. Mettre `CORS_ORIGIN` sur l'URL publique du frontend Next.
+6. Utiliser Upstash Redis pour `REDIS_URL` si Render ne fournit pas Redis dans le plan choisi.
+7. Apres le premier deploy, creer le webhook Stripe vers `/webhooks/stripe`.
+
 ## Endpoints
 
 - `POST /checkout`

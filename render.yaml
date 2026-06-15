@@ -1,0 +1,66 @@
+services:
+  - type: web
+    name: totem-backend
+    runtime: docker
+    branch: main
+    rootDir: .
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health/live
+    autoDeploy: true
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: PUBLIC_ASSET_BASE_URL
+        sync: false
+      - key: CORS_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: TOTEM_WORKER_CONCURRENCY
+        value: 50
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: CHECKOUT_SUCCESS_URL
+        sync: false
+      - key: CHECKOUT_CANCEL_URL
+        sync: false
+      - key: TOTEM_PRICE_ORIGINE_CENTS
+        value: 4900
+      - key: TOTEM_PRICE_ANCESTRAL_CENTS
+        value: 8900
+      - key: TOTEM_PRICE_FAMILLE_CENTS
+        value: 19900
+      - key: TOTEM_TEXT_API_URL
+        sync: false
+      - key: TOTEM_IMAGE_API_URL
+        sync: false
+      - key: TOTEM_AUDIO_API_URL
+        sync: false
+      - key: TOTEM_PDF_API_URL
+        sync: false
+      - key: TOTEM_MICROSERVICE_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: SUPABASE_STORAGE_BUCKET
+        value: totem-deliveries
+      - key: DELIVERY_SIGNING_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: RESEND_SENDER_EMAIL
+        sync: false
+      - key: RESEND_SENDER_NAME
+        value: TOTEM ANCESTRAL
+      - key: ALERT_EMAIL
+        sync: false
