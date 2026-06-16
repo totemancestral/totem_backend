@@ -12,10 +12,10 @@ export class TotemAssetsController {
 
     response.setHeader("Content-Type", object.contentType);
     response.setHeader("Cache-Control", "private, max-age=300");
-
-    if (object.contentType === "application/pdf") {
-      response.setHeader("Content-Disposition", 'attachment; filename="totem-parchemin.pdf"');
-    }
+    response.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${downloadFilename(object.contentType)}"`,
+    );
 
     if (object.contentLength) {
       response.setHeader("Content-Length", object.contentLength.toString());
@@ -23,4 +23,12 @@ export class TotemAssetsController {
 
     object.body.pipe(response);
   }
+}
+
+function downloadFilename(contentType: string): string {
+  if (contentType === "application/pdf") return "totem-parchemin.pdf";
+  if (contentType.startsWith("audio/")) return "totem-narration.mp3";
+  if (contentType === "image/jpeg") return "totem-image.jpg";
+  if (contentType.startsWith("image/")) return "totem-image.png";
+  return "totem-asset";
 }

@@ -90,7 +90,7 @@ export class SupabaseMirrorService {
       commande_id: commandId,
       numero_serie: numeroSerie,
       nom_totem: input.text.ancestralName,
-      recit: input.text.parchmentText,
+      recit: composeDeliveredStory(input.text),
       image_url: input.image.url,
       audio_url: input.audio.url,
       pdf_url: input.pdf.url,
@@ -175,7 +175,11 @@ export class SupabaseMirrorService {
   }
 
   private async insertOeuvre(oeuvre: Record<string, unknown>): Promise<string> {
-    const { data, error } = await this.supabase.from("oeuvres").insert(oeuvre).select("id").single();
+    const { data, error } = await this.supabase
+      .from("oeuvres")
+      .insert(oeuvre)
+      .select("id")
+      .single();
 
     if (error || !data) throw new Error(`supabase_oeuvre_mirror_failed:${error?.message}`);
     return data.id as string;
@@ -209,7 +213,7 @@ export class SupabaseMirrorService {
       user_id: input.userId,
       version: 1,
       type: "full",
-      recit: input.text.parchmentText,
+      recit: composeDeliveredStory(input.text),
       nom_totem: input.text.ancestralName,
       image_url: input.image.url,
       is_current: true,
@@ -256,6 +260,12 @@ export class SupabaseMirrorService {
     if (error) throw new Error(`supabase_command_lookup_failed:${error.message}`);
     return (data?.id as string | undefined) ?? null;
   }
+}
+
+function composeDeliveredStory(text: TotemTextPayload): string {
+  const pages = text.storyPages.map((page) => `${page.title}\n${page.text}`.trim()).filter(Boolean);
+
+  return [text.parchmentText, ...pages].filter(Boolean).join("\n\n");
 }
 
 function isUuid(value: string): boolean {

@@ -15,7 +15,7 @@ const workerConcurrency = readWorkerConcurrency();
 @Injectable()
 @Processor(TOTEM_QUEUE, {
   concurrency: workerConcurrency,
-  lockDuration: 15 * 60 * 1000,
+  lockDuration: 90 * 60 * 1000,
 })
 export class TotemWorker extends WorkerHost {
   constructor(
@@ -75,12 +75,18 @@ export class TotemWorker extends WorkerHost {
       });
       const image = await this.storage.store(order.id, "image", imageArtefact);
 
+      const storyImages = await this.generation.generateStoryImages({
+        orderId: order.id,
+        archetypeId: text.archetypeId,
+        text,
+      });
+
       const [audio, pdf] = await Promise.all([
         this.generation
           .generateAudio({
             orderId: order.id,
             archetypeId: text.archetypeId,
-            text: text.audioMessage,
+            text: this.generation.buildAudioNarration(text),
           })
           .then((artefact) => this.storage.store(order.id, "audio", artefact)),
         this.generation
@@ -93,6 +99,7 @@ export class TotemWorker extends WorkerHost {
             text,
             answers,
             image: imageArtefact,
+            storyImages,
           })
           .then((artefact) => this.storage.store(order.id, "pdf", artefact)),
       ]);
@@ -219,11 +226,11 @@ function normalizeError(error: unknown): string {
 }
 
 function readWorkerConcurrency(): number {
-  const value = Number(process.env.TOTEM_WORKER_CONCURRENCY ?? 50);
+  const value = Number(process.env.TOTEM_WORKER_CONCURRENCY ?? 2);
 
   if (!Number.isFinite(value) || value < 1) {
-    return 50;
+    return 2;
   }
 
-  return Math.min(Math.trunc(value), 500);
+  return Math.min(Math.trunc(value), 50);
 }

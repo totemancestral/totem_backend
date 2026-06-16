@@ -10,6 +10,20 @@ const answersArraySchema = z.array(answerSchema).length(10);
 
 const compactAnswersSchema = z.array(z.string().min(1).max(4000)).length(10);
 
+const storyPageSchema = z
+  .object({
+    page: z.number().int().positive().optional(),
+    title: z.string().min(1).optional(),
+    titre: z.string().min(1).optional(),
+    text: z.string().min(1).optional(),
+    texte: z.string().min(1).optional(),
+    recit: z.string().min(1).optional(),
+    imagePrompt: z.string().min(1).optional(),
+    image_prompt: z.string().min(1).optional(),
+    prompt_image: z.string().min(1).optional(),
+  })
+  .passthrough();
+
 const metadataSchema = z
   .object({
     userId: z.string().min(1).max(120),
@@ -78,6 +92,9 @@ export const textPayloadSchema = z
     audioMessage: z.string().min(1).optional(),
     prompt_image: z.string().min(1).optional(),
     imagePrompt: z.string().min(1).optional(),
+    storyPages: z.array(storyPageSchema).optional(),
+    pages: z.array(storyPageSchema).optional(),
+    chapitres: z.array(storyPageSchema).optional(),
   })
   .transform(
     (value): TotemTextPayload => ({
@@ -86,6 +103,7 @@ export const textPayloadSchema = z
       parchmentText: value.parchmentText ?? value.texte_parchemin ?? "",
       audioMessage: value.audioMessage ?? value.message_audio ?? "",
       imagePrompt: value.imagePrompt ?? value.prompt_image ?? "",
+      storyPages: normalizeStoryPages(value.storyPages ?? value.pages ?? value.chapitres ?? []),
     }),
   )
   .pipe(
@@ -95,8 +113,33 @@ export const textPayloadSchema = z
       parchmentText: z.string().min(1),
       audioMessage: z.string().min(1),
       imagePrompt: z.string().min(1),
+      storyPages: z.array(
+        z.object({
+          page: z.number().int().positive(),
+          title: z.string().min(1),
+          text: z.string().min(1),
+          imagePrompt: z.string().min(1),
+        }),
+      ),
     }),
   );
+
+function normalizeStoryPages(pages: z.infer<typeof storyPageSchema>[]) {
+  return pages
+    .map((page, index) => ({
+      page: page.page ?? index + 1,
+      title: page.title ?? page.titre ?? `Page ${index + 1}`,
+      text: page.text ?? page.texte ?? page.recit ?? "",
+      imagePrompt: page.imagePrompt ?? page.image_prompt ?? page.prompt_image ?? "",
+    }))
+    .filter((page) => page.text.trim().length > 0 && page.imagePrompt.trim().length > 0)
+    .map((page, index) => ({
+      page: index + 1,
+      title: page.title.trim(),
+      text: page.text.trim(),
+      imagePrompt: page.imagePrompt.trim(),
+    }));
+}
 
 export function parseCheckoutMetadata(
   rawMetadata: Record<string, string> | null | undefined,

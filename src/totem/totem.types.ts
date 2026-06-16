@@ -5,6 +5,13 @@ export type QuestionnaireAnswer = {
 
 export type TotemOffer = "origine" | "ancestral" | "famille";
 
+export type TotemStoryPage = {
+  page: number;
+  title: string;
+  text: string;
+  imagePrompt: string;
+};
+
 export type CheckoutMetadata = {
   userId: string;
   email?: string;
@@ -22,6 +29,7 @@ export type TotemTextPayload = {
   parchmentText: string;
   audioMessage: string;
   imagePrompt: string;
+  storyPages: TotemStoryPage[];
 };
 
 export type GeneratedArtefact = {

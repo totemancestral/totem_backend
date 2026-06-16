@@ -21,7 +21,11 @@ services:
       - key: REDIS_URL
         sync: false
       - key: TOTEM_WORKER_CONCURRENCY
-        value: 50
+        value: 2
+      - key: TOTEM_STORY_PAGE_COUNT
+        value: 20
+      - key: TOTEM_IMAGE_GENERATION_CONCURRENCY
+        value: 2
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
@@ -43,7 +47,7 @@ services:
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_IMAGE_MODEL
-        value: gpt-image-1
+        value: gpt-image-2
       - key: OPENAI_TTS_MODEL
         value: gpt-4o-mini-tts
       - key: OPENAI_TTS_VOICE
