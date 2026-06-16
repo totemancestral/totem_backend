@@ -18,9 +18,13 @@ async function bootstrap(): Promise<void> {
 
   if (corsOrigin) {
     app.enableCors({
-      origin: corsOrigin.split(',').map((origin) => origin.trim()).filter(Boolean),
-      methods: ['GET', 'POST', 'OPTIONS'],
+      origin: corsOrigin
+        .split(',')
+        .map((origin) => origin.trim())
+        .filter(Boolean),
+      methods: ['GET', 'HEAD', 'POST', 'OPTIONS'],
       allowedHeaders: ['Authorization', 'Content-Type', 'Stripe-Signature'],
+      exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type'],
     });
   }
 
