@@ -21,6 +21,8 @@ export class HealthController {
   async ready(): Promise<{ status: 'ok' }> {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
+      await this.prisma.$queryRaw`SELECT 1 FROM "TotemOrder" LIMIT 1`;
+      await this.prisma.$queryRaw`SELECT 1 FROM "TotemPipelineError" LIMIT 1`;
       await this.queue.getJobCounts('waiting', 'active', 'delayed', 'failed');
 
       return { status: 'ok' };
