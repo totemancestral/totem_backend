@@ -19,7 +19,7 @@ Backend de production de TOTEM Ancestral. Il gere Stripe, la queue BullMQ, la ge
 - Verifier les webhooks Stripe.
 - Creer des sessions Stripe Checkout depuis un JWT Supabase utilisateur.
 - Creer ou mettre a jour les commandes backend de facon idempotente.
-- Executer le pipeline asynchrone texte -> image couverture -> images de pages -> audio long -> PDF -> upload -> email.
+- Executer le pipeline asynchrone texte -> image couverture -> image recit -> audio long -> PDF -> upload -> email.
 - Stocker les livrables dans le bucket Supabase prive `totem-deliveries`.
 - Generer des URLs signees via `GET /totem-assets/:token`.
 - Miroir les commandes et oeuvres dans Supabase pour le frontend.
@@ -108,7 +108,7 @@ Notes:
 - `PUBLIC_ASSET_BASE_URL` doit etre l'URL publique du backend, sans slash final.
 - `DATABASE_URL` doit utiliser le pooler Supabase IPv4 en production si l'hebergeur ne supporte pas IPv6.
 - `REDIS_URL` doit utiliser `rediss://` avec Upstash TLS.
-- `TOTEM_WORKER_CONCURRENCY` est volontairement bas car une commande genere au moins 20 images.
+- `TOTEM_WORKER_CONCURRENCY` reste bas car une commande genere deux images IA et un audio long.
 - `OPENAI_IMAGE_MODEL` est `gpt-image-2` pour les visuels sculpture/artefact.
 
 ## Pipeline de generation
@@ -124,17 +124,17 @@ Le pipeline est lance par un job BullMQ dans `TotemWorker`.
    - `parchmentText`
    - `audioMessage`
    - `imagePrompt`
-   - `storyPages[]` avec au moins 20 pages texte + prompt image.
+   - `storyPages[]` avec les sections du long recit.
 5. Generer l'image de couverture.
-6. Generer une image par page de recit.
+6. Generer une seule image principale du recit, apres la couverture.
 7. Generer un audio long a partir du prologue et des pages.
-8. Generer le PDF parchemin: couverture + minimum 20 pages, chaque page contenant image et texte concordants.
+8. Generer le PDF parchemin: couverture avec la premiere image, page de recit avec la seconde image, puis texte long continu sur autant de pages que necessaire.
 9. Uploader image, audio et PDF dans Supabase Storage.
 10. Mettre a jour `TotemOrder`, miroir `oeuvres`/`oeuvRESEND_API_KEY_VALUE`, puis envoyer l'email.
 
 ## Style visuel des images
 
-Toutes les images sont forcees cote backend avec un prompt de style commun. Le totem doit apparaitre comme une sculpture/artefact rituel premium:
+Les deux images sont forcees cote backend avec un prompt de style commun. Le totem doit apparaitre comme une sculpture/artefact rituel premium:
 
 - animal totem reconnaissable et stable sur toutes les pages;
 - matieres noir ebene/obsidienne, metal sombre, bronze vieilli, incrustations or;

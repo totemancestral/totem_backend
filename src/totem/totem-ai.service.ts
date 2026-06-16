@@ -88,7 +88,6 @@ export class TotemAiService {
   private readonly openAiTtsModel: string;
   private readonly openAiTtsVoice: string;
   private readonly storyPageCount: number;
-  private readonly imageGenerationConcurrency: number;
 
   constructor(config: ConfigService) {
     this.anthropicApiKey = config.getOrThrow<string>("ANTHROPIC_API_KEY");
@@ -98,7 +97,6 @@ export class TotemAiService {
     this.openAiTtsModel = config.getOrThrow<string>("OPENAI_TTS_MODEL");
     this.openAiTtsVoice = config.getOrThrow<string>("OPENAI_TTS_VOICE");
     this.storyPageCount = config.get<number>("TOTEM_STORY_PAGE_COUNT") ?? 20;
-    this.imageGenerationConcurrency = config.get<number>("TOTEM_IMAGE_GENERATION_CONCURRENCY") ?? 2;
   }
 
   async generateText(payload: TextRequest): Promise<TotemTextPayload> {
@@ -113,7 +111,7 @@ export class TotemAiService {
         },
         body: JSON.stringify({
           model: this.anthropicModel,
-          max_tokens: 16000,
+          max_tokens: 12_000,
           temperature: 0.85,
           system: buildTextSystemPrompt(payload.locale, this.storyPageCount),
           messages: [
@@ -124,7 +122,7 @@ export class TotemAiService {
           ],
         }),
       },
-      90_000,
+      240_000,
     );
 
     await assertOk(response, "anthropic_text");
@@ -149,13 +147,13 @@ export class TotemAiService {
   async generateStoryImages(payload: StoryImagesRequest): Promise<GeneratedArtefact[]> {
     const storyPages = this.buildStoryPages(payload.text);
 
-    return mapWithConcurrency(storyPages, this.imageGenerationConcurrency, (page) =>
-      this.generateImage({
-        orderId: payload.orderId,
-        archetypeId: payload.archetypeId,
-        prompt: buildSceneImagePrompt(payload.text, page),
-      }),
-    );
+    const storyImage = await this.generateImage({
+      orderId: payload.orderId,
+      archetypeId: payload.archetypeId,
+      prompt: buildPrimaryStoryImagePrompt(payload.text, storyPages),
+    });
+
+    return [storyImage];
   }
 
   async generateImage(payload: ImageRequest): Promise<GeneratedArtefact> {
@@ -285,9 +283,9 @@ Contraintes :
 - Le totem doit etre un animal/archetype central identifiable et stable dans tout le coffret.
 - parchmentText : prologue rituel de 1200 a 1800 caracteres, paragraphes separes par des doubles sauts de ligne.
 - storyPages : exactement ${storyPageCount} objets, numerotes de 1 a ${storyPageCount}.
-- Chaque storyPages[i].text : 650 a 950 caracteres, autonome, narratif, concordant avec son imagePrompt, et toujours relie au meme totem.
-- Chaque storyPages[i].imagePrompt : decrire une scene premium carree ou verticale dans l'univers de cette page, avec le meme animal totem reconnaissable sous forme de sculpture/artefact rituel noir, bronze et or, gravures ancestrales, dans des lieux/epoques/ambiances varies, sans typographie ni mot visible.
-- Aucune page ne doit etre seulement decorative : chaque imagePrompt doit correspondre directement au texte de la meme page.
+- Chaque storyPages[i].text : 320 a 520 caracteres, autonome, narratif, concordant avec l'univers du recit, et toujours relie au meme totem.
+- Chaque storyPages[i].imagePrompt : decrire un fragment visuel de l'univers du recit, avec le meme animal totem reconnaissable sous forme de sculpture/artefact rituel noir, bronze et or, gravures ancestrales, sans typographie ni mot visible.
+- L'ensemble des storyPages forme un long recit continu; evite les repetitions et garde une progression narrative claire.
 - audioMessage : 500 a 900 caracteres, naturel a lire a voix haute, comme ouverture avant la grande histoire.
 - imagePrompt : decrire la couverture carree, symbolique, premium, avec le meme totem en sculpture rituelle noire/bronze/or, sans typographie ni mot visible.
 - archetypeId : ASCII, kebab-case, stable.
@@ -352,6 +350,22 @@ function buildAudioNarration(text: TotemTextPayload, minimumCount: number): stri
     .filter(Boolean)
     .join("\n\n")
     .slice(0, 28_000);
+}
+
+function buildPrimaryStoryImagePrompt(text: TotemTextPayload, pages: TotemStoryPage[]): string {
+  const excerpt = pages
+    .slice(0, 5)
+    .map((page) => `${page.title}: ${page.text}`)
+    .join("\n")
+    .slice(0, 1800);
+
+  return [
+    `Main story illustration for the long ancestral tale of ${text.ancestralName} (${text.archetypeId}).`,
+    "This is the second and only interior image of the delivered parchment: it must summarize the spiritual universe of the story without trying to show every chapter.",
+    excerpt,
+    "The same animal totem must appear as a carved ritual sculpture, central and recognizable, carrying memory, protection and revelation.",
+    "Premium ancestral sculpture artwork, cinematic composition, sacred atmosphere, no letters, no typography, no visible words, no watermark.",
+  ].join("\n");
 }
 
 function buildSceneImagePrompt(text: TotemTextPayload, page: TotemStoryPage): string {
@@ -541,34 +555,234 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
     color: pdfColor("soft"),
   });
 
-  const storyPageCount = Math.max(
-    20,
-    payload.text.storyPages.length,
-    payload.storyImages?.length ?? 0,
-  );
+  const storyPageCount = Math.max(1, payload.text.storyPages.length || 20);
   const storyPages = ensureStoryPages(payload.text, storyPageCount);
-  const storyImages: Array<PDFImage | null> = [];
-  for (let index = 0; index < storyPages.length; index += 1) {
-    storyImages.push(await embedPdfImage(doc, payload.storyImages?.[index] ?? payload.image));
-  }
+  const storyImage = await embedPdfImage(doc, payload.storyImages?.[0] ?? payload.image);
 
-  storyPages.forEach((storyPage, index) => {
-    const page = doc.addPage([width, height]);
-    const box = drawRoyalParchment(page, width, height);
-    drawStoryPage(
-      page,
-      { titleFont, bodyFont, italicFont },
-      storyPage,
-      storyImages[index] ?? coverImage,
-      index + 1,
-      storyPages.length,
-      width,
-      height,
-      box,
-    );
+  drawStoryFlow(doc, {
+    width,
+    height,
+    titleFont,
+    bodyFont,
+    italicFont,
+    text: payload.text,
+    storyPages,
+    storyImage: storyImage ?? coverImage,
   });
 
   return doc.save();
+}
+
+function drawStoryFlow(
+  doc: PDFDocument,
+  input: {
+    width: number;
+    height: number;
+    titleFont: PDFFont;
+    bodyFont: PDFFont;
+    italicFont: PDFFont;
+    text: TotemTextPayload;
+    storyPages: TotemStoryPage[];
+    storyImage: PDFImage | null;
+  },
+): void {
+  const sections = buildStorySections(input.text, input.storyPages);
+  let pageNumber = 1;
+  let cursor = createStoryContentPage(doc, input, pageNumber, true);
+
+  for (const section of sections) {
+    const titleLines = wrapPdfText(
+      section.title.toUpperCase(),
+      input.titleFont,
+      10,
+      cursor.maxWidth,
+    );
+    const neededTitleHeight = titleLines.length * 13 + 8;
+    if (cursor.y - neededTitleHeight < cursor.bottomY) {
+      pageNumber += 1;
+      cursor = createStoryContentPage(doc, input, pageNumber, false);
+    }
+
+    for (const titleLine of titleLines) {
+      cursor.page.drawText(titleLine, {
+        x: cursor.textX,
+        y: cursor.y,
+        size: 10,
+        font: input.titleFont,
+        color: pdfColor("goldDark"),
+      });
+      cursor.y -= 13;
+    }
+    cursor.y -= 4;
+
+    const paragraphs = section.text
+      .split(/\n{2,}/)
+      .map((paragraph) => paragraph.trim())
+      .filter(Boolean);
+
+    for (const paragraph of paragraphs) {
+      const paragraphFont = section.index % 2 === 0 ? input.italicFont : input.bodyFont;
+      const lines = wrapPdfText(paragraph, paragraphFont, 9.4, cursor.maxWidth);
+
+      for (const line of lines) {
+        if (cursor.y - 14 < cursor.bottomY) {
+          pageNumber += 1;
+          cursor = createStoryContentPage(doc, input, pageNumber, false);
+        }
+
+        cursor.page.drawText(line, {
+          x: cursor.textX,
+          y: cursor.y,
+          size: 9.4,
+          font: paragraphFont,
+          color: pdfColor("ink"),
+        });
+        cursor.y -= 14;
+      }
+
+      cursor.y -= 7;
+    }
+
+    cursor.y -= 8;
+  }
+
+  if (cursor.y - 80 < cursor.bottomY) {
+    pageNumber += 1;
+    cursor = createStoryContentPage(doc, input, pageNumber, false);
+  }
+
+  drawCentered(
+    cursor.page,
+    input.bodyFont,
+    "--- * ---",
+    10,
+    cursor.y,
+    input.width,
+    pdfColor("goldDark"),
+  );
+  cursor.y -= 38;
+  drawWaxSeal(cursor.page, input.width / 2, cursor.y, 23, input.titleFont);
+  cursor.y -= 42;
+  drawCentered(
+    cursor.page,
+    input.italicFont,
+    `Totem: ${input.text.ancestralName}`,
+    11,
+    cursor.y,
+    input.width,
+    pdfColor("goldDark"),
+  );
+}
+
+function createStoryContentPage(
+  doc: PDFDocument,
+  input: {
+    width: number;
+    height: number;
+    titleFont: PDFFont;
+    bodyFont: PDFFont;
+    storyImage: PDFImage | null;
+  },
+  pageNumber: number,
+  withImage: boolean,
+): { page: PDFPage; textX: number; y: number; bottomY: number; maxWidth: number } {
+  const page = doc.addPage([input.width, input.height]);
+  const box = drawRoyalParchment(page, input.width, input.height);
+
+  drawCentered(
+    page,
+    input.titleFont,
+    "LE RECIT",
+    16,
+    input.height - 102,
+    input.width,
+    pdfColor("goldDark"),
+  );
+  drawCentered(
+    page,
+    input.bodyFont,
+    "--- * ---",
+    10,
+    input.height - 124,
+    input.width,
+    pdfColor("goldDark"),
+  );
+
+  let y = input.height - 156;
+  if (withImage) {
+    const frameWidth = Math.min(286, box.width - 108);
+    const frameHeight = 188;
+    const frameX = input.width / 2 - frameWidth / 2;
+    const frameY = input.height - 344;
+    drawImageFrame(page, input.storyImage, frameX, frameY, frameWidth, frameHeight, pageNumber);
+    y = frameY - 30;
+  }
+
+  drawCentered(
+    page,
+    input.bodyFont,
+    `Page ${pageNumber}`,
+    8,
+    box.y + 34,
+    input.width,
+    pdfColor("soft"),
+  );
+
+  return {
+    page,
+    textX: box.x + 48,
+    y,
+    bottomY: box.y + 78,
+    maxWidth: box.width - 96,
+  };
+}
+
+function drawImageFrame(
+  page: PDFPage,
+  image: PDFImage | null,
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  seed: number,
+): void {
+  page.drawRectangle({
+    x: x - 6,
+    y: y - 6,
+    width: width + 12,
+    height: height + 12,
+    color: pdfColor("goldDark"),
+    opacity: 0.38,
+  });
+  page.drawRectangle({
+    x: x - 2,
+    y: y - 2,
+    width: width + 4,
+    height: height + 4,
+    color: pdfColor("gold"),
+    opacity: 0.85,
+  });
+
+  if (image) {
+    drawImageInside(page, image, x, y, width, height);
+    return;
+  }
+
+  drawSymbolicScenePanel(page, x, y, width, height, seed);
+}
+
+function buildStorySections(
+  text: TotemTextPayload,
+  storyPages: TotemStoryPage[],
+): Array<{ index: number; title: string; text: string }> {
+  return [
+    { index: 0, title: "Prologue", text: text.parchmentText },
+    ...storyPages.map((page, index) => ({
+      index: index + 1,
+      title: page.title,
+      text: page.text,
+    })),
+  ].filter((section) => section.text.trim().length > 0);
 }
 
 function drawRoyalParchment(
