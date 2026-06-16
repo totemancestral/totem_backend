@@ -1,9 +1,21 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage } from "pdf-lib";
+import {
+  PDFDocument,
+  StandardFonts,
+  rgb,
+  type PDFFont,
+  type PDFImage,
+  type PDFPage,
+} from "pdf-lib";
 import { z } from "zod";
 import { textPayloadSchema } from "./totem.schemas";
-import { GeneratedArtefact, QuestionnaireAnswer, TotemOffer, TotemTextPayload } from "./totem.types";
+import {
+  GeneratedArtefact,
+  QuestionnaireAnswer,
+  TotemOffer,
+  TotemTextPayload,
+} from "./totem.types";
 
 type TextRequest = {
   orderId: string;
@@ -33,6 +45,7 @@ type PdfRequest = {
   offer: TotemOffer;
   text: TotemTextPayload;
   answers: QuestionnaireAnswer[];
+  image?: GeneratedArtefact;
 };
 
 const anthropicResponseSchema = z.object({
@@ -260,14 +273,66 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   const firstPage = doc.addPage([width, height]);
   drawBackground(firstPage, width, height);
   drawCentered(firstPage, titleFont, "TOTEM ANCESTRAL", 24, height - 92, width, pdfColor("ink"));
-  drawCentered(firstPage, italicFont, "Certificat de revelation symbolique", 13, height - 122, width, pdfColor("soft"));
-  drawCentered(firstPage, titleFont, normalizePdfText(payload.text.ancestralName).toUpperCase(), 28, height - 205, width, pdfColor("ink"));
+  drawCentered(
+    firstPage,
+    italicFont,
+    "Certificat de revelation symbolique",
+    13,
+    height - 122,
+    width,
+    pdfColor("soft"),
+  );
+
+  let titleY = height - 205;
+  const coverImage = await embedPdfImage(doc, payload.image);
+  if (coverImage) {
+    const imageSize = 250;
+    const imageX = width / 2 - imageSize / 2;
+    const imageY = height - 410;
+    firstPage.drawRectangle({
+      x: imageX - 7,
+      y: imageY - 7,
+      width: imageSize + 14,
+      height: imageSize + 14,
+      color: pdfColor("goldDark"),
+      opacity: 0.45,
+    });
+    firstPage.drawRectangle({
+      x: imageX - 3,
+      y: imageY - 3,
+      width: imageSize + 6,
+      height: imageSize + 6,
+      color: pdfColor("gold"),
+      opacity: 0.9,
+    });
+    firstPage.drawImage(coverImage, { x: imageX, y: imageY, width: imageSize, height: imageSize });
+    titleY = imageY - 52;
+  }
+
+  drawCenteredFit(
+    firstPage,
+    titleFont,
+    normalizePdfText(payload.text.ancestralName).toUpperCase(),
+    28,
+    titleY,
+    width,
+    width - 112,
+    pdfColor("ink"),
+  );
 
   const holder = payload.customerName
     ? `Prepare pour ${payload.customerName}`
     : "Oeuvre personnelle et unique";
-  drawCentered(firstPage, bodyFont, holder, 12, height - 238, width, pdfColor("soft"));
-  drawCentered(firstPage, bodyFont, `Offre: ${payload.offer.toUpperCase()}`, 10, 120, width, pdfColor("goldDark"));
+  drawCentered(firstPage, bodyFont, holder, 12, titleY - 33, width, pdfColor("soft"));
+  drawCentered(
+    firstPage,
+    bodyFont,
+    `Offre: ${payload.offer.toUpperCase()}`,
+    10,
+    120,
+    width,
+    pdfColor("goldDark"),
+  );
   firstPage.drawText(`Commande: ${payload.orderId}`, {
     x: 56,
     y: 58,
@@ -321,7 +386,15 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   }
 
   y -= 18;
-  drawCentered(page, italicFont, `Totem: ${payload.text.ancestralName}`, 12, y, width, pdfColor("goldDark"));
+  drawCentered(
+    page,
+    italicFont,
+    `Totem: ${payload.text.ancestralName}`,
+    12,
+    y,
+    width,
+    pdfColor("goldDark"),
+  );
 
   return doc.save();
 }
@@ -364,6 +437,49 @@ function drawCentered(
     font,
     color,
   });
+}
+
+function drawCenteredFit(
+  page: PDFPage,
+  font: PDFFont,
+  text: string,
+  size: number,
+  y: number,
+  pageWidth: number,
+  maxWidth: number,
+  color: ReturnType<typeof rgb>,
+): void {
+  let fontSize = size;
+  const safe = normalizePdfText(text);
+
+  while (font.widthOfTextAtSize(safe, fontSize) > maxWidth && fontSize > 14) {
+    fontSize -= 1;
+  }
+
+  page.drawText(safe, {
+    x: pageWidth / 2 - font.widthOfTextAtSize(safe, fontSize) / 2,
+    y,
+    size: fontSize,
+    font,
+    color,
+  });
+}
+
+async function embedPdfImage(
+  doc: PDFDocument,
+  image?: GeneratedArtefact,
+): Promise<PDFImage | null> {
+  if (!image) return null;
+
+  try {
+    if (image.contentType.includes("jpeg") || image.extension.toLowerCase() === "jpg") {
+      return await doc.embedJpg(image.bytes);
+    }
+
+    return await doc.embedPng(image.bytes);
+  } catch {
+    return null;
+  }
 }
 
 function wrapPdfText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {

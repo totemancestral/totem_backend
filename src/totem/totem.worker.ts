@@ -68,14 +68,14 @@ export class TotemWorker extends WorkerHost {
         },
       });
 
-      const [image, audio, pdf] = await Promise.all([
-        this.generation
-          .generateImage({
-            orderId: order.id,
-            archetypeId: text.archetypeId,
-            prompt: text.imagePrompt,
-          })
-          .then((artefact) => this.storage.store(order.id, "image", artefact)),
+      const imageArtefact = await this.generation.generateImage({
+        orderId: order.id,
+        archetypeId: text.archetypeId,
+        prompt: text.imagePrompt,
+      });
+      const image = await this.storage.store(order.id, "image", imageArtefact);
+
+      const [audio, pdf] = await Promise.all([
         this.generation
           .generateAudio({
             orderId: order.id,
@@ -92,6 +92,7 @@ export class TotemWorker extends WorkerHost {
             offer: order.offer,
             text,
             answers,
+            image: imageArtefact,
           })
           .then((artefact) => this.storage.store(order.id, "pdf", artefact)),
       ]);
