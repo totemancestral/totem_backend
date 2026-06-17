@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
+import fontkit from "@pdf-lib/fontkit";
 import {
   PDFDocument,
   StandardFonts,
@@ -8,6 +9,8 @@ import {
   type PDFImage,
   type PDFPage,
 } from "pdf-lib";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { z } from "zod";
 import { textPayloadSchema } from "./totem.schemas";
 import {
@@ -476,11 +479,13 @@ async function mapWithConcurrency<T, R>(
 
 async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
   const width = 595;
   const height = 842;
   const titleFont = await doc.embedFont(StandardFonts.TimesRomanBold);
   const bodyFont = await doc.embedFont(StandardFonts.TimesRoman);
   const italicFont = await doc.embedFont(StandardFonts.TimesRomanItalic);
+  const manuscriptFont = await loadManuscriptFont(doc);
 
   const firstPage = doc.addPage([width, height]);
   const firstBox = drawRoyalParchment(firstPage, width, height);
@@ -565,6 +570,7 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
     titleFont,
     bodyFont,
     italicFont,
+    manuscriptFont,
     text: payload.text,
     storyPages,
     storyImage: storyImage ?? coverImage,
@@ -581,6 +587,7 @@ function drawStoryFlow(
     titleFont: PDFFont;
     bodyFont: PDFFont;
     italicFont: PDFFont;
+    manuscriptFont: PDFFont | null;
     text: TotemTextPayload;
     storyPages: TotemStoryPage[];
     storyImage: PDFImage | null;
@@ -621,11 +628,20 @@ function drawStoryFlow(
       .filter(Boolean);
 
     for (const paragraph of paragraphs) {
-      const paragraphFont = section.index % 2 === 0 ? input.italicFont : input.bodyFont;
-      const lines = wrapPdfText(paragraph, paragraphFont, 9.4, cursor.maxWidth);
+      const paragraphFont =
+        input.manuscriptFont ?? (section.index % 2 === 0 ? input.italicFont : input.bodyFont);
+      const paragraphSize = input.manuscriptFont ? 12.2 : 9.4;
+      const paragraphLineHeight = input.manuscriptFont ? 17.2 : 14;
+      const lines = wrapPdfText(
+        paragraph,
+        paragraphFont,
+        paragraphSize,
+        cursor.maxWidth,
+        Boolean(input.manuscriptFont),
+      );
 
       for (const line of lines) {
-        if (cursor.y - 14 < cursor.bottomY) {
+        if (cursor.y - paragraphLineHeight < cursor.bottomY) {
           pageNumber += 1;
           cursor = createStoryContentPage(doc, input, pageNumber, false);
         }
@@ -633,11 +649,11 @@ function drawStoryFlow(
         cursor.page.drawText(line, {
           x: cursor.textX,
           y: cursor.y,
-          size: 9.4,
+          size: paragraphSize,
           font: paragraphFont,
           color: pdfColor("ink"),
         });
-        cursor.y -= 14;
+        cursor.y -= paragraphLineHeight;
       }
 
       cursor.y -= 7;
@@ -672,6 +688,16 @@ function drawStoryFlow(
     input.width,
     pdfColor("goldDark"),
   );
+}
+
+async function loadManuscriptFont(doc: PDFDocument): Promise<PDFFont | null> {
+  try {
+    const bytes = await readFile(join(process.cwd(), "assets/fonts/DancingScript-Regular.ttf"));
+    return await doc.embedFont(bytes, { subset: true });
+  } catch (error) {
+    console.error("[pdf] manuscript font", error);
+    return null;
+  }
 }
 
 function createStoryContentPage(
@@ -1272,8 +1298,15 @@ async function embedPdfImage(
   }
 }
 
-function wrapPdfText(text: string, font: PDFFont, size: number, maxWidth: number): string[] {
-  const words = normalizePdfText(text).split(/\s+/).filter(Boolean);
+function wrapPdfText(
+  text: string,
+  font: PDFFont,
+  size: number,
+  maxWidth: number,
+  preserveDiacritics = false,
+): string[] {
+  const safeText = preserveDiacritics ? normalizeManuscriptPdfText(text) : normalizePdfText(text);
+  const words = safeText.split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let current = "";
 
@@ -1301,6 +1334,18 @@ function normalizePdfText(value: string): string {
     .replace(/œ/g, "oe")
     .replace(/Œ/g, "OE")
     .replace(/[^\x20-\x7E]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeManuscriptPdfText(value: string): string {
+  return value
+    .replace(/[’‘]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/[–—]/g, "-")
+    .replace(/œ/g, "oe")
+    .replace(/Œ/g, "OE")
+    .replace(/[\x00-\x1F\x7F]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
