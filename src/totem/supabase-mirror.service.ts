@@ -143,6 +143,33 @@ export class SupabaseMirrorService {
     });
   }
 
+  async readPaidCommand(input: {
+    externalCommandId: string;
+    userId: string;
+  }): Promise<{ id: string; checkoutSessionId: string; status: string }> {
+    if (!isUuid(input.externalCommandId)) throw new Error("external_command_invalid");
+
+    const { data, error } = await this.supabase
+      .from("commandes")
+      .select("id, stripe_session_id, statut")
+      .eq("id", input.externalCommandId)
+      .eq("user_id", input.userId)
+      .maybeSingle();
+
+    if (error) throw new Error(`supabase_command_lookup_failed:${error.message}`);
+    if (!data?.id) throw new Error("commande_not_found");
+    if (data.statut !== "paye" && data.statut !== "en_generation" && data.statut !== "livree") {
+      throw new Error("payment_not_confirmed");
+    }
+    if (!data.stripe_session_id) throw new Error("stripe_session_missing");
+
+    return {
+      id: data.id as string,
+      checkoutSessionId: data.stripe_session_id as string,
+      status: data.statut as string,
+    };
+  }
+
   private async findOrCreateCommand(input: {
     order: TotemOrder;
     externalCommandId?: string;

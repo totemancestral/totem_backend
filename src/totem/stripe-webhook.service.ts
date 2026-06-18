@@ -324,7 +324,7 @@ export class StripeWebhookService {
     if (!metadata) return false;
     if (typeof metadata.answers === "string") return true;
 
-    return Array.from({ length: 10 }, (_, index) => `q${index + 1}`).every(
+    return Array.from({ length: 11 }, (_, index) => `q${index + 1}`).every(
       (key) => typeof metadata[key] === "string" && metadata[key].length > 0,
     );
   }
@@ -333,6 +333,7 @@ export class StripeWebhookService {
     const order = await this.prisma.totemOrder.findUniqueOrThrow({ where: { id: orderId } });
 
     if (order.status !== TotemOrderStatus.pending || order.queuedAt) return;
+    if (!hasEnoughAnswersForGeneration(order.answers)) return;
 
     await this.queue.enqueue(order.id);
 
@@ -341,4 +342,16 @@ export class StripeWebhookService {
       data: { queuedAt: new Date() },
     });
   }
+}
+
+export function hasEnoughAnswersForGeneration(value: Prisma.JsonValue): boolean {
+  if (!Array.isArray(value)) return false;
+  const answers = value.filter(
+    (answer) => isRecord(answer) && typeof answer.answer === "string" && answer.answer.trim(),
+  );
+  return answers.length >= 11;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

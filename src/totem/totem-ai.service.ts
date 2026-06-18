@@ -13,6 +13,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { textPayloadSchema } from "./totem.schemas";
+import { allowedTotemAnimalNames, selectTotemAnimal, TotemAnimal } from "./totem-animals";
 import {
   GeneratedArtefact,
   QuestionnaireAnswer,
@@ -103,6 +104,7 @@ export class TotemAiService {
   }
 
   async generateText(payload: TextRequest): Promise<TotemTextPayload> {
+    const selectedAnimal = selectTotemAnimal(payload.answers);
     const response = await fetchWithTimeout(
       "https://api.anthropic.com/v1/messages",
       {
@@ -116,11 +118,11 @@ export class TotemAiService {
           model: this.anthropicModel,
           max_tokens: 12_000,
           temperature: 0.85,
-          system: buildTextSystemPrompt(payload.locale, this.storyPageCount),
+          system: buildTextSystemPrompt(payload.locale, this.storyPageCount, selectedAnimal),
           messages: [
             {
               role: "user",
-              content: buildTextUserPrompt(payload),
+              content: buildTextUserPrompt(payload, selectedAnimal),
             },
           ],
         }),
@@ -136,7 +138,7 @@ export class TotemAiService {
       .join("\n")
       .trim();
 
-    return textPayloadSchema.parse(parseJsonObject(content));
+    return enforceSelectedAnimal(textPayloadSchema.parse(parseJsonObject(content)), selectedAnimal);
   }
 
   buildStoryPages(text: TotemTextPayload): TotemStoryPage[] {
@@ -263,10 +265,15 @@ export class TotemAiService {
   }
 }
 
-function buildTextSystemPrompt(locale?: string | null, storyPageCount = 20): string {
+function buildTextSystemPrompt(
+  locale?: string | null,
+  storyPageCount = 20,
+  selectedAnimal?: TotemAnimal,
+): string {
   const language = locale?.startsWith("en") ? "anglais" : "francais";
+  const animalName = selectedAnimal?.name ?? "animal selectionne";
 
-  return `Tu es le moteur editorial de TOTEM ANCESTRAL. Tu crees un coffret digital spirituel et poetique a partir de dix reponses utilisateur.
+  return `Tu es le moteur editorial de TOTEM ANCESTRAL. Tu crees un coffret digital spirituel et poetique a partir de onze reponses utilisateur.
 
 Reponds uniquement avec un objet JSON valide, sans Markdown, sans commentaire, avec exactement ces cles :
 {
@@ -283,7 +290,9 @@ Reponds uniquement avec un objet JSON valide, sans Markdown, sans commentaire, a
 Contraintes :
 - Langue de sortie : ${language}.
 - Ton : griot ancestral, mystique, intime, noble, jamais caricatural.
-- Le totem doit etre un animal/archetype central identifiable et stable dans tout le coffret.
+- Liste autorisee des animaux totems : ${allowedTotemAnimalNames()}.
+- Le totem animal central obligatoire est : ${animalName}. Tu ne dois choisir aucun autre animal central.
+- Le totem doit etre identifiable et stable dans tout le coffret : ${animalName} apparait dans le recit, le nom public, le prompt de couverture et les prompts de pages.
 - parchmentText : prologue rituel de 1200 a 1800 caracteres, paragraphes separes par des doubles sauts de ligne.
 - storyPages : exactement ${storyPageCount} objets, numerotes de 1 a ${storyPageCount}.
 - Chaque storyPages[i].text : 320 a 520 caracteres, autonome, narratif, concordant avec l'univers du recit, et toujours relie au meme totem.
@@ -295,7 +304,7 @@ Contraintes :
 - ancestralName : court, memorisable, sans emoji.`;
 }
 
-function buildTextUserPrompt(payload: TextRequest): string {
+function buildTextUserPrompt(payload: TextRequest, selectedAnimal: TotemAnimal): string {
   const name = payload.customerName?.trim() || "cette personne";
   const answers = payload.answers
     .map((answer, index) => `${index + 1}. ${answer.questionId}: ${answer.answer}`)
@@ -308,7 +317,36 @@ Prenom ou nom: ${name}
 Reponses du parcours initiatique :
 ${answers}
 
+Animal totem impose par le moteur de selection : ${selectedAnimal.name}.
+
 Compose maintenant le JSON final du coffret TOTEM ANCESTRAL.`;
+}
+
+function enforceSelectedAnimal(
+  text: TotemTextPayload,
+  selectedAnimal: TotemAnimal,
+): TotemTextPayload {
+  const name = selectedAnimal.name;
+  const namePattern = new RegExp(`\\b${escapeRegExp(name)}\\b`, "i");
+  const ancestralName = namePattern.test(text.ancestralName)
+    ? text.ancestralName
+    : `${name} ${text.ancestralName}`.trim();
+  const instruction = `Animal totem obligatoire et reconnaissable: ${name}.`;
+
+  return {
+    ...text,
+    archetypeId: selectedAnimal.slug,
+    ancestralName,
+    imagePrompt: `${instruction} ${text.imagePrompt}`,
+    storyPages: text.storyPages.map((page) => ({
+      ...page,
+      imagePrompt: `${instruction} ${page.imagePrompt}`,
+    })),
+  };
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function ensureStoryPages(text: TotemTextPayload, minimumCount: number): TotemStoryPage[] {
@@ -607,7 +645,7 @@ function drawStoryFlow(
     const neededTitleHeight = titleLines.length * 13 + 8;
     if (cursor.y - neededTitleHeight < cursor.bottomY) {
       pageNumber += 1;
-      cursor = createStoryContentPage(doc, input, pageNumber, false);
+      cursor = createStoryContentPage(doc, input, pageNumber, true);
     }
 
     for (const titleLine of titleLines) {
@@ -643,7 +681,7 @@ function drawStoryFlow(
       for (const line of lines) {
         if (cursor.y - paragraphLineHeight < cursor.bottomY) {
           pageNumber += 1;
-          cursor = createStoryContentPage(doc, input, pageNumber, false);
+          cursor = createStoryContentPage(doc, input, pageNumber, true);
         }
 
         cursor.page.drawText(line, {
@@ -664,25 +702,17 @@ function drawStoryFlow(
 
   if (cursor.y - 80 < cursor.bottomY) {
     pageNumber += 1;
-    cursor = createStoryContentPage(doc, input, pageNumber, false);
+    cursor = createStoryContentPage(doc, input, pageNumber, true);
   }
 
-  drawCentered(
-    cursor.page,
-    input.bodyFont,
-    "--- * ---",
-    10,
-    cursor.y,
-    input.width,
-    pdfColor("goldDark"),
-  );
-  cursor.y -= 38;
+  drawCentered(cursor.page, input.titleFont, "INSIGNE", 15, cursor.y, input.width, pdfColor("ink"));
+  cursor.y -= 30;
   drawWaxSeal(cursor.page, input.width / 2, cursor.y, 23, input.titleFont);
   cursor.y -= 42;
   drawCentered(
     cursor.page,
     input.italicFont,
-    `Totem: ${input.text.ancestralName}`,
+    `Signature du Totem Ancestral: ${input.text.ancestralName}`,
     11,
     cursor.y,
     input.width,
@@ -1293,7 +1323,13 @@ async function embedPdfImage(
     }
 
     return await doc.embedPng(image.bytes);
-  } catch {
+  } catch (error) {
+    console.error("[pdf] image embed failed", {
+      contentType: image.contentType,
+      extension: image.extension,
+      bytes: image.bytes.length,
+      error,
+    });
     return null;
   }
 }

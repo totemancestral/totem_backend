@@ -17,9 +17,12 @@ const checkoutInputSchema = z.object({
         answer: z.string().min(1).max(4000),
       }),
     )
-    .length(10),
+    .min(4)
+    .max(11),
   locale: z.string().min(2).max(12).optional(),
   customerName: z.string().min(1).max(120).optional(),
+  successUrl: z.string().url().max(500).optional(),
+  cancelUrl: z.string().url().max(500).optional(),
 });
 
 export type CheckoutInput = z.infer<typeof checkoutInputSchema>;
@@ -93,8 +96,8 @@ export class CheckoutService {
       payment_intent_data: {
         metadata: baseMetadata,
       },
-      success_url: this.successUrl,
-      cancel_url: this.cancelUrl,
+      success_url: payload.successUrl ?? this.successUrl,
+      cancel_url: payload.cancelUrl ?? this.cancelUrl,
     });
 
     const order = await this.prisma.totemOrder.create({

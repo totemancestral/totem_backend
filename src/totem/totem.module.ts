@@ -5,6 +5,8 @@ import { StripeWebhookController } from "./stripe-webhook.controller";
 import { StripeWebhookService } from "./stripe-webhook.service";
 import { CheckoutController } from "./checkout.controller";
 import { CheckoutService } from "./checkout.service";
+import { TotemOrdersController } from "./totem-orders.controller";
+import { TotemOrdersService } from "./totem-orders.service";
 import { TotemQueueService } from "./totem-queue.service";
 import { TotemWorker } from "./totem.worker";
 import { TotemAiService } from "./totem-ai.service";
@@ -30,12 +32,14 @@ import { PrismaModule } from "../prisma/prisma.module";
   ],
   controllers: [
     CheckoutController,
+    TotemOrdersController,
     StripeWebhookController,
     TotemAssetsController,
     HealthController,
   ],
   providers: [
     CheckoutService,
+    TotemOrdersService,
     StripeWebhookService,
     TotemQueueService,
     TotemWorker,
