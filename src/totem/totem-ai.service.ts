@@ -565,7 +565,7 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
     titleY = imageY - 52;
   }
 
-  drawCenteredFit(
+  const titleHeight = drawCenteredFit(
     firstPage,
     titleFont,
     normalizePdfText(payload.text.ancestralName).toUpperCase(),
@@ -575,11 +575,12 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
     width - 112,
     pdfColor("ink"),
   );
+  const titleBottomY = titleY - titleHeight + 28;
 
   const holder = payload.customerName
     ? `Prepare pour ${payload.customerName}`
     : "Oeuvre personnelle et unique";
-  drawCentered(firstPage, bodyFont, holder, 12, titleY - 33, width, pdfColor("soft"));
+  drawCentered(firstPage, bodyFont, holder, 12, titleBottomY - 33, width, pdfColor("soft"));
   drawWaxSeal(firstPage, width / 2, firstBox.y + 74, 26, titleFont);
   drawCentered(
     firstPage,
@@ -636,11 +637,12 @@ function drawStoryFlow(
   let cursor = createStoryContentPage(doc, input, pageNumber, true);
 
   for (const section of sections) {
+    const titleSize = 10;
     const titleLines = wrapPdfText(
       section.title.toUpperCase(),
       input.titleFont,
-      10,
-      cursor.maxWidth,
+      titleSize,
+      cursor.maxWidth - 24,
     );
     const neededTitleHeight = titleLines.length * 13 + 8;
     if (cursor.y - neededTitleHeight < cursor.bottomY) {
@@ -650,9 +652,12 @@ function drawStoryFlow(
 
     for (const titleLine of titleLines) {
       cursor.page.drawText(titleLine, {
-        x: cursor.textX,
+        x:
+          cursor.textX +
+          cursor.maxWidth / 2 -
+          input.titleFont.widthOfTextAtSize(titleLine, titleSize) / 2,
         y: cursor.y,
-        size: 10,
+        size: titleSize,
         font: input.titleFont,
         color: pdfColor("goldDark"),
       });
@@ -721,12 +726,59 @@ function drawStoryFlow(
 }
 
 async function loadManuscriptFont(doc: PDFDocument): Promise<PDFFont | null> {
+  const localPaths = [
+    join(process.cwd(), "assets/fonts/DancingScript-Regular.ttf"),
+    join(process.cwd(), "public/fonts/totem/DancingScript-Regular.ttf"),
+    join(process.cwd(), "dist/assets/fonts/DancingScript-Regular.ttf"),
+  ];
+
+  for (const localPath of localPaths) {
+    try {
+      const bytes = await readFile(localPath);
+      return await doc.embedFont(bytes, { subset: true });
+    } catch {
+      // Try the next known deployment layout before falling back to the public site.
+    }
+  }
+
+  for (const remoteUrl of manuscriptFontUrls()) {
+    try {
+      const response = await fetch(remoteUrl, { cache: "force-cache" });
+      if (!response.ok) throw new Error(`font_fetch_${response.status}`);
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      return await doc.embedFont(bytes, { subset: true });
+    } catch {
+      // Keep trying candidate URLs; a final concise error is logged below.
+    }
+  }
+
+  console.error("[pdf] manuscript font unavailable", {
+    localPaths,
+    remoteUrls: manuscriptFontUrls(),
+  });
+  return null;
+}
+
+function manuscriptFontUrls(): string[] {
+  const values = [
+    process.env.CORS_ORIGIN,
+    checkoutOrigin(process.env.CHECKOUT_SUCCESS_URL),
+    checkoutOrigin(process.env.CHECKOUT_CANCEL_URL),
+    process.env.PUBLIC_SITE_URL,
+    process.env.SITE_URL,
+  ].filter(Boolean);
+
+  return Array.from(new Set(values)).map(
+    (baseUrl) => `${baseUrl!.replace(/\/$/, "")}/fonts/totem/DancingScript-Regular.ttf`,
+  );
+}
+
+function checkoutOrigin(value?: string): string | undefined {
+  if (!value) return undefined;
   try {
-    const bytes = await readFile(join(process.cwd(), "assets/fonts/DancingScript-Regular.ttf"));
-    return await doc.embedFont(bytes, { subset: true });
-  } catch (error) {
-    console.error("[pdf] manuscript font", error);
-    return null;
+    return new URL(value).origin;
+  } catch {
+    return undefined;
   }
 }
 
@@ -1294,21 +1346,31 @@ function drawCenteredFit(
   pageWidth: number,
   maxWidth: number,
   color: ReturnType<typeof rgb>,
-): void {
+): number {
   let fontSize = size;
   const safe = normalizePdfText(text);
+  let lines = wrapPdfText(safe, font, fontSize, maxWidth);
 
-  while (font.widthOfTextAtSize(safe, fontSize) > maxWidth && fontSize > 14) {
+  while (
+    (lines.length > 2 || lines.some((line) => font.widthOfTextAtSize(line, fontSize) > maxWidth)) &&
+    fontSize > 14
+  ) {
     fontSize -= 1;
+    lines = wrapPdfText(safe, font, fontSize, maxWidth);
   }
 
-  page.drawText(safe, {
-    x: pageWidth / 2 - font.widthOfTextAtSize(safe, fontSize) / 2,
-    y,
-    size: fontSize,
-    font,
-    color,
+  const lineHeight = fontSize * 1.08;
+  lines.forEach((line, index) => {
+    page.drawText(line, {
+      x: pageWidth / 2 - font.widthOfTextAtSize(line, fontSize) / 2,
+      y: y - index * lineHeight,
+      size: fontSize,
+      font,
+      color,
+    });
   });
+
+  return lines.length * lineHeight;
 }
 
 async function embedPdfImage(
@@ -1342,7 +1404,10 @@ function wrapPdfText(
   preserveDiacritics = false,
 ): string[] {
   const safeText = preserveDiacritics ? normalizeManuscriptPdfText(text) : normalizePdfText(text);
-  const words = safeText.split(/\s+/).filter(Boolean);
+  const words = safeText
+    .split(/\s+/)
+    .filter(Boolean)
+    .flatMap((word) => splitLongPdfWord(word, font, size, maxWidth));
   const lines: string[] = [];
   let current = "";
 
@@ -1358,6 +1423,24 @@ function wrapPdfText(
 
   if (current) lines.push(current);
   return lines;
+}
+
+function splitLongPdfWord(word: string, font: PDFFont, size: number, maxWidth: number): string[] {
+  if (font.widthOfTextAtSize(word, size) <= maxWidth) return [word];
+
+  const chunks: string[] = [];
+  let current = "";
+  for (const char of Array.from(word)) {
+    const candidate = `${current}${char}`;
+    if (current && font.widthOfTextAtSize(candidate, size) > maxWidth) {
+      chunks.push(current);
+      current = char;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
 }
 
 function normalizePdfText(value: string): string {
