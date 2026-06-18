@@ -769,7 +769,7 @@ function manuscriptFontUrls(): string[] {
   ].filter(Boolean);
 
   return Array.from(new Set(values)).map(
-    (baseUrl) => `${baseUrl!.replace(/\/$/, "")}/fonts/totem/DancingScript-Regular.ttf`,
+    (baseUrl) => `${baseUrl!.replace(/\/$/, "")}/api/fonts/totem/DancingScript-Regular.ttf`,
   );
 }
 
