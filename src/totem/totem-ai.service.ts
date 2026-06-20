@@ -743,9 +743,7 @@ async function loadManuscriptFont(doc: PDFDocument): Promise<PDFFont | null> {
 
   for (const remoteUrl of manuscriptFontUrls()) {
     try {
-      const response = await fetch(remoteUrl, { cache: "force-cache" });
-      if (!response.ok) throw new Error(`font_fetch_${response.status}`);
-      const bytes = new Uint8Array(await response.arrayBuffer());
+      const bytes = await fetchManuscriptFontBytes(remoteUrl);
       return await doc.embedFont(bytes, { subset: true });
     } catch {
       // Keep trying candidate URLs; a final concise error is logged below.
@@ -759,27 +757,31 @@ async function loadManuscriptFont(doc: PDFDocument): Promise<PDFFont | null> {
   return null;
 }
 
-function manuscriptFontUrls(): string[] {
-  const values = [
-    process.env.CORS_ORIGIN,
-    checkoutOrigin(process.env.CHECKOUT_SUCCESS_URL),
-    checkoutOrigin(process.env.CHECKOUT_CANCEL_URL),
-    process.env.PUBLIC_SITE_URL,
-    process.env.SITE_URL,
-  ].filter(Boolean);
+async function fetchManuscriptFontBytes(remoteUrl: string): Promise<Uint8Array> {
+  const response = await fetch(remoteUrl, {
+    cache: "force-cache",
+    headers: { Accept: "text/css,*/*" },
+  });
+  if (!response.ok) throw new Error(`font_fetch_${response.status}`);
 
-  return Array.from(new Set(values)).map(
-    (baseUrl) => `${baseUrl!.replace(/\/$/, "")}/api/fonts/totem/DancingScript-Regular.ttf`,
-  );
+  const contentType = response.headers.get("content-type") ?? "";
+  if (contentType.includes("text/css") || remoteUrl.includes("fonts.googleapis.com")) {
+    const css = await response.text();
+    const fontUrl = css.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/)?.[1];
+    if (!fontUrl) throw new Error("font_css_url_missing");
+
+    const fontResponse = await fetch(fontUrl, { cache: "force-cache" });
+    if (!fontResponse.ok) throw new Error(`font_binary_fetch_${fontResponse.status}`);
+    return new Uint8Array(await fontResponse.arrayBuffer());
+  }
+
+  return new Uint8Array(await response.arrayBuffer());
 }
 
-function checkoutOrigin(value?: string): string | undefined {
-  if (!value) return undefined;
-  try {
-    return new URL(value).origin;
-  } catch {
-    return undefined;
-  }
+function manuscriptFontUrls(): string[] {
+  return [
+    "https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500;600;700&display=swap",
+  ];
 }
 
 function createStoryContentPage(

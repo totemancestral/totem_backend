@@ -37,9 +37,10 @@ export const envSchema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
   SUPABASE_STORAGE_BUCKET: z.string().min(1),
   DELIVERY_SIGNING_SECRET: z.string().min(32),
-  RESEND_API_KEY: z.string().min(1),
-  RESEND_SENDER_EMAIL: optionalEmail,
-  RESEND_SENDER_NAME: z.string().min(1),
+  BREVO_API_KEY: z.string().min(1),
+  BREVO_SENDER_EMAIL: z.string().email(),
+  BREVO_SENDER_NAME: z.string().min(1).default('TOTEM ANCESTRAL'),
+  CONTACT_EMAIL: optionalEmail,
   ALERT_EMAIL: optionalEmail,
   CORS_ORIGIN: z.string().optional(),
 });

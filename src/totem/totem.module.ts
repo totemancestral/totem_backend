@@ -11,7 +11,7 @@ import { TotemQueueService } from "./totem-queue.service";
 import { TotemWorker } from "./totem.worker";
 import { TotemAiService } from "./totem-ai.service";
 import { SupabaseStorageService } from "./supabase-storage.service";
-import { ResendMailerService } from "./resend-mailer.service";
+import { BrevoMailerService } from "./brevo-mailer.service";
 import { SupabaseAuthService } from "./supabase-auth.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemAssetsController } from "./totem-assets.controller";
@@ -45,7 +45,7 @@ import { PrismaModule } from "../prisma/prisma.module";
     TotemWorker,
     TotemAiService,
     SupabaseStorageService,
-    ResendMailerService,
+    BrevoMailerService,
     SupabaseAuthService,
     SupabaseMirrorService,
   ],
