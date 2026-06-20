@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { textPayloadSchema } from "./totem.schemas";
 import { allowedTotemAnimalNames, selectTotemAnimal, TotemAnimal } from "./totem-animals";
+import { containsAnimalName, normalizeTotemTitle } from "./totem-name";
 import {
   GeneratedArtefact,
   QuestionnaireAnswer,
@@ -301,7 +302,7 @@ Contraintes :
 - audioMessage : 500 a 900 caracteres, naturel a lire a voix haute, comme ouverture avant la grande histoire.
 - imagePrompt : decrire la couverture carree, symbolique, premium, avec le meme totem en sculpture rituelle noire/bronze/or, sans typographie ni mot visible.
 - archetypeId : ASCII, kebab-case, stable.
-- ancestralName : court, memorisable, sans emoji.`;
+- ancestralName : court, memorisable, sans emoji. Ne repete jamais deux fois le nom de l'animal dans ce titre.`;
 }
 
 function buildTextUserPrompt(payload: TextRequest, selectedAnimal: TotemAnimal): string {
@@ -327,10 +328,10 @@ function enforceSelectedAnimal(
   selectedAnimal: TotemAnimal,
 ): TotemTextPayload {
   const name = selectedAnimal.name;
-  const namePattern = new RegExp(`\\b${escapeRegExp(name)}\\b`, "i");
-  const ancestralName = namePattern.test(text.ancestralName)
-    ? text.ancestralName
-    : `${name} ${text.ancestralName}`.trim();
+  const normalizedTitle = normalizeTotemTitle(text.ancestralName, name);
+  const ancestralName = containsAnimalName(normalizedTitle, name)
+    ? normalizedTitle
+    : normalizeTotemTitle(`${name} ${normalizedTitle}`, name);
   const instruction = `Animal totem obligatoire et reconnaissable: ${name}.`;
 
   return {
@@ -343,10 +344,6 @@ function enforceSelectedAnimal(
       imagePrompt: `${instruction} ${page.imagePrompt}`,
     })),
   };
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function ensureStoryPages(text: TotemTextPayload, minimumCount: number): TotemStoryPage[] {
