@@ -3,24 +3,24 @@ import { QuestionnaireAnswer } from "./totem.types";
 export type TotemAnimal = { name: string; slug: string };
 
 export const TOTEM_ANIMALS: TotemAnimal[] = [
-  "Elephant",
+  "Éléphant",
   "Lion",
   "Python",
   "Crocodile",
   "Serpent",
-  "Rhinoceros",
+  "Rhinocéros",
   "Aigle",
   "Perroquet",
-  "Zebre",
-  "Leopard",
-  "Panthere",
-  "Guepard",
-  "Hyene",
+  "Zèbre",
+  "Léopard",
+  "Panthère",
+  "Guépard",
+  "Hyène",
   "Buffle",
   "Hippopotame",
   "Girafe",
   "Gorille",
-  "Chimpanze",
+  "Chimpanzé",
   "Babouin",
   "Singe vert",
   "Mandrill",
@@ -29,22 +29,22 @@ export const TOTEM_ANIMALS: TotemAnimal[] = [
   "Impala",
   "Oryx",
   "Koudou",
-  "Phacochere",
+  "Phacochère",
   "Pangolin",
   "Tortue",
-  "Cameleon",
+  "Caméléon",
   "Varane",
   "Gecko",
   "Cobra",
-  "Vipere",
+  "Vipère",
   "Boa",
   "Mamba noir",
   "Rose flamboyante",
   "Autruche",
   "Calao",
   "Marabout",
-  "Pelican",
-  "Heron",
+  "Pélican",
+  "Héron",
   "Ibis",
   "Faucon",
   "Vautour",
@@ -53,19 +53,19 @@ export const TOTEM_ANIMALS: TotemAnimal[] = [
   "Corbeau",
   "Colombe",
   "Paon",
-  "Grue couronnee",
+  "Grue couronnée",
   "Abeille",
   "Fourmi",
   "Termite",
-  "Scarabee",
+  "Scarabée",
   "Papillon",
   "Libellule",
   "Moustique",
   "Scorpion",
-  "Araignee",
+  "Araignée",
   "Crabe",
   "Crevette",
-  "Chat poisson",
+  "Chat de poisson",
   "Tilapia",
   "Carpe",
   "Requin",
@@ -73,7 +73,7 @@ export const TOTEM_ANIMALS: TotemAnimal[] = [
   "Lamantin",
   "Phoque moine",
   "Chacal",
-  "Renard du desert",
+  "Renard du désert",
   "Fennec",
   "Lycaon",
   "Civette",
@@ -81,21 +81,21 @@ export const TOTEM_ANIMALS: TotemAnimal[] = [
   "Mangouste",
   "Suricate",
   "Loutre",
-  "Ecureuil",
+  "Écureuil",
   "Rat palmiste",
-  "Lievre",
-  "Porc-epic",
-  "Herisson",
+  "Lièvre",
+  "Porc-épic",
+  "Hérisson",
   "Chauve-souris",
-  "Ane",
+  "Âne",
   "Cheval",
   "Dromadaire",
   "Chameau",
   "Taureau",
   "Vache",
-  "Belier",
+  "Bélier",
   "Bouc",
-  "Chevre",
+  "Chèvre",
   "Coq",
   "Poule",
   "Pintade",
@@ -106,18 +106,15 @@ export const TOTEM_ANIMALS: TotemAnimal[] = [
 
 export function selectTotemAnimal(answers: QuestionnaireAnswer[]): TotemAnimal {
   const signature = answers
-    .map((answer) => `${answer.questionId}:${answer.answer}`)
+    .map(
+      (answer) =>
+        `${normalizeSignaturePart(answer.questionId)}:${normalizeSignaturePart(answer.answer)}`,
+    )
     .join("|")
     .trim();
-  let hash = 2166136261;
-  const input = signature || "totem-ancestral";
+  const hash = hashTotemSignature(signature || "totem-ancestral");
 
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, 16777619);
-  }
-
-  return TOTEM_ANIMALS[Math.abs(hash) % TOTEM_ANIMALS.length] ?? TOTEM_ANIMALS[0]!;
+  return TOTEM_ANIMALS[hash % TOTEM_ANIMALS.length] ?? TOTEM_ANIMALS[0]!;
 }
 
 export function allowedTotemAnimalNames(): string {
@@ -131,4 +128,18 @@ function slugifyAnimal(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+function normalizeSignaturePart(value: string): string {
+  return value.normalize("NFKC").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+function hashTotemSignature(value: string): number {
+  let hash = 2166136261;
+  for (const [index, char] of Array.from(value).entries()) {
+    hash ^= char.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+    hash ^= index + value.length;
+  }
+  return hash >>> 0;
 }

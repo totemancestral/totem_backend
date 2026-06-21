@@ -710,16 +710,6 @@ function drawStoryFlow(
   drawCentered(cursor.page, input.titleFont, "INSIGNE", 15, cursor.y, input.width, pdfColor("ink"));
   cursor.y -= 30;
   drawWaxSeal(cursor.page, input.width / 2, cursor.y, 23, input.titleFont);
-  cursor.y -= 42;
-  drawCentered(
-    cursor.page,
-    input.italicFont,
-    `Signature du Totem Ancestral: ${input.text.ancestralName}`,
-    11,
-    cursor.y,
-    input.width,
-    pdfColor("goldDark"),
-  );
 }
 
 async function loadManuscriptFont(doc: PDFDocument): Promise<PDFFont | null> {
