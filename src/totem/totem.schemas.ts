@@ -6,9 +6,9 @@ const answerSchema = z.object({
   answer: z.string().min(1).max(4000),
 });
 
-const answersArraySchema = z.array(answerSchema).length(11);
+const answersArraySchema = z.array(answerSchema).length(10);
 
-const compactAnswersSchema = z.array(z.string().min(1).max(4000)).length(11);
+const compactAnswersSchema = z.array(z.string().min(1).max(4000)).length(10);
 
 const storyPageSchema = z
   .object({
@@ -175,7 +175,7 @@ function parseAnswers(metadata: Record<string, unknown>): QuestionnaireAnswer[] 
     return answersArraySchema.parse(parsed);
   }
 
-  const answers = Array.from({ length: 11 }, (_, index) => {
+  const answers = Array.from({ length: 10 }, (_, index) => {
     const key = `q${index + 1}`;
     const answer = metadata[key];
 

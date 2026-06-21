@@ -274,7 +274,7 @@ function buildTextSystemPrompt(
   const language = locale?.startsWith("en") ? "anglais" : "francais";
   const animalName = selectedAnimal?.name ?? "animal selectionne";
 
-  return `Tu es le moteur editorial de TOTEM ANCESTRAL. Tu crees un coffret digital spirituel et poetique a partir de onze reponses utilisateur.
+  return `Tu es le moteur editorial de TOTEM ANCESTRAL. Tu crees un coffret digital spirituel et poetique a partir de dix reponses utilisateur.
 
 Reponds uniquement avec un objet JSON valide, sans Markdown, sans commentaire, avec exactement ces cles :
 {

@@ -15,7 +15,7 @@ const completeOrderSchema = z.object({
         answer: z.string().min(1).max(4000),
       }),
     )
-    .length(11),
+    .length(10),
   locale: z.string().min(2).max(12).optional(),
 });
 

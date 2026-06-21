@@ -18,7 +18,7 @@ const checkoutInputSchema = z.object({
       }),
     )
     .min(4)
-    .max(11),
+    .max(10),
   locale: z.string().min(2).max(12).optional(),
   customerName: z.string().min(1).max(120).optional(),
   successUrl: z.string().url().max(500).optional(),
