@@ -11,7 +11,15 @@ export class TotemQueueService {
     private readonly queue: Queue<TotemJobPayload>,
   ) {}
 
-  async enqueue(orderId: string): Promise<void> {
+  async enqueue(orderId: string, force = false): Promise<void> {
+    if (force) {
+      const existing = await this.queue.getJob(orderId);
+      const state = existing ? await existing.getState() : null;
+      if (existing && state !== "active") {
+        await existing.remove().catch(() => undefined);
+      }
+    }
+
     await this.queue.add(
       TOTEM_JOB,
       { orderId },

@@ -8,7 +8,9 @@ const answerSchema = z.object({
 
 const answersArraySchema = z.array(answerSchema).length(10);
 
-const compactAnswersSchema = z.array(z.string().min(1).max(4000)).length(10);
+const metadataAnswersArraySchema = z.array(answerSchema).min(1).max(10);
+
+const compactAnswersSchema = z.array(z.string().min(1).max(4000)).min(1).max(10);
 
 const storyPageSchema = z
   .object({
@@ -172,7 +174,7 @@ function parseAnswers(metadata: Record<string, unknown>): QuestionnaireAnswer[] 
       }));
     }
 
-    return answersArraySchema.parse(parsed);
+    return metadataAnswersArraySchema.parse(parsed);
   }
 
   const answers = Array.from({ length: 10 }, (_, index) => {
@@ -185,5 +187,7 @@ function parseAnswers(metadata: Record<string, unknown>): QuestionnaireAnswer[] 
     };
   });
 
-  return answersArraySchema.parse(answers);
+  return metadataAnswersArraySchema.parse(
+    answers.filter((answer) => typeof answer.answer === "string" && answer.answer.trim()),
+  );
 }

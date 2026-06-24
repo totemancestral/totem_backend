@@ -1,7 +1,7 @@
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { TotemOrder } from '@prisma/client';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import { Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { TotemOrder } from "@prisma/client";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 type DeliveryPayload = {
   order: TotemOrder;
@@ -32,7 +32,7 @@ type RenderedEmail = {
 };
 
 @Injectable()
-export class BrevoMailerService {
+export class ResendMailerService {
   private readonly apiKey: string;
   private readonly senderEmail: string;
   private readonly senderName: string;
@@ -40,13 +40,13 @@ export class BrevoMailerService {
   private readonly supabase: SupabaseClient;
 
   constructor(config: ConfigService) {
-    this.apiKey = config.getOrThrow<string>('BREVO_API_KEY');
-    this.senderEmail = config.getOrThrow<string>('BREVO_SENDER_EMAIL');
-    this.senderName = config.get<string>('BREVO_SENDER_NAME') ?? 'TOTEM ANCESTRAL';
-    this.alertEmail = config.get<string>('ALERT_EMAIL') ?? config.get<string>('CONTACT_EMAIL');
+    this.apiKey = config.getOrThrow<string>("RESEND_API_KEY");
+    this.senderEmail = config.getOrThrow<string>("RESEND_FROM_EMAIL");
+    this.senderName = config.get<string>("RESEND_FROM_NAME") ?? "Totem Ancestral";
+    this.alertEmail = config.get<string>("ALERT_EMAIL") ?? config.get<string>("CONTACT_EMAIL");
     this.supabase = createClient(
-      config.getOrThrow<string>('SUPABASE_URL'),
-      config.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY'),
+      config.getOrThrow<string>("SUPABASE_URL"),
+      config.getOrThrow<string>("SUPABASE_SERVICE_ROLE_KEY"),
       {
         auth: {
           persistSession: false,
@@ -96,7 +96,7 @@ export class BrevoMailerService {
       audioUrl: escapeAttribute(payload.audioUrl),
       pdfUrl: escapeAttribute(payload.pdfUrl),
     };
-    const template = await this.readTemplate('delivery', locale);
+    const template = await this.readTemplate("delivery", locale);
 
     if (template) return renderStoredTemplate(template, params);
     return renderFallbackDelivery(payload, copy);
@@ -107,7 +107,7 @@ export class BrevoMailerService {
       orderId: escapeHtml(orderId),
       error: escapeHtml(error),
     };
-    const template = await this.readTemplate('pipeline_failure', 'fr');
+    const template = await this.readTemplate("pipeline_failure", "fr");
 
     if (template) return renderStoredTemplate(template, params);
     return {
@@ -116,55 +116,60 @@ export class BrevoMailerService {
     };
   }
 
-  private async readTemplate(templateKey: string, locale: 'fr' | 'en'): Promise<EmailTemplate | null> {
+  private async readTemplate(
+    templateKey: string,
+    locale: "fr" | "en",
+  ): Promise<EmailTemplate | null> {
     const localized = await this.readTemplateRow(templateKey, locale);
-    if (localized || locale === 'fr') return localized;
-    return this.readTemplateRow(templateKey, 'fr');
+    if (localized || locale === "fr") return localized;
+    return this.readTemplateRow(templateKey, "fr");
   }
 
-  private async readTemplateRow(templateKey: string, locale: 'fr' | 'en'): Promise<EmailTemplate | null> {
+  private async readTemplateRow(
+    templateKey: string,
+    locale: "fr" | "en",
+  ): Promise<EmailTemplate | null> {
     const { data, error } = await this.supabase
-      .from('email_templates')
-      .select('subject, html_content')
-      .eq('template_key', templateKey)
-      .eq('locale', locale)
+      .from("email_templates")
+      .select("subject, html_content")
+      .eq("template_key", templateKey)
+      .eq("locale", locale)
       .maybeSingle();
 
     if (error) return null;
     return data as EmailTemplate | null;
   }
 
-  private async send(payload: {
-    to: string[];
-    subject: string;
-    html: string;
-  }): Promise<void> {
-    const response = await fetch('https://api.brevo.com/v3/smtp/email', {
-      method: 'POST',
+  private async send(payload: { to: string[]; subject: string; html: string }): Promise<void> {
+    const response = await fetch("https://api.resend.com/emails", {
+      method: "POST",
       headers: {
-        'api-key': this.apiKey,
-        'Content-Type': 'application/json',
+        Authorization: `Bearer ${this.apiKey}`,
+        "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        sender: { name: this.senderName, email: this.senderEmail },
-        to: payload.to.map((email) => ({ email })),
+        from: `${this.senderName} <${this.senderEmail}>`,
+        to: payload.to,
         subject: payload.subject,
-        htmlContent: payload.html,
+        html: payload.html,
       }),
     });
 
     if (!response.ok) {
-      const detail = await response.text().catch(() => '');
-      throw new Error(`brevo_failed:${response.status}:${detail.slice(0, 300)}`);
+      const detail = await response.text().catch(() => "");
+      throw new Error(`resend_failed:${response.status}:${detail.slice(0, 300)}`);
     }
   }
 }
 
-function normalizeLocale(locale: string | null): 'fr' | 'en' {
-  return locale === 'en' ? 'en' : 'fr';
+function normalizeLocale(locale: string | null): "fr" | "en" {
+  return locale === "en" ? "en" : "fr";
 }
 
-function renderStoredTemplate(template: EmailTemplate, params: Record<string, string>): RenderedEmail {
+function renderStoredTemplate(
+  template: EmailTemplate,
+  params: Record<string, string>,
+): RenderedEmail {
   return {
     subject: interpolate(template.subject, params),
     html: interpolate(template.html_content, params),
@@ -172,32 +177,32 @@ function renderStoredTemplate(template: EmailTemplate, params: Record<string, st
 }
 
 function interpolate(template: string, params: Record<string, string>): string {
-  return template.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_, key: string) => params[key] ?? '');
+  return template.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g, (_, key: string) => params[key] ?? "");
 }
 
-function readDeliveryCopy(locale: 'fr' | 'en'): DeliveryCopy {
-  if (locale === 'en') {
+function readDeliveryCopy(locale: "fr" | "en"): DeliveryCopy {
+  if (locale === "en") {
     return {
-      subject: 'Your TOTEM ANCESTRAL box is ready',
-      ready: 'Your digital box is ready.',
-      linksIntro: 'Your files are available here:',
-      image: 'Image',
-      audio: 'Audio',
-      pdf: 'PDF',
-      signedNotice: 'These signed links remain valid for 30 days.',
-      fallbackName: 'Your totem',
+      subject: "Your TOTEM ANCESTRAL box is ready",
+      ready: "Your digital box is ready.",
+      linksIntro: "Your files are available here:",
+      image: "Image",
+      audio: "Audio",
+      pdf: "PDF",
+      signedNotice: "These signed links remain valid for 30 days.",
+      fallbackName: "Your totem",
     };
   }
 
   return {
-    subject: 'Votre coffret TOTEM ANCESTRAL est pret',
-    ready: 'Votre coffret digital est pret.',
-    linksIntro: 'Vos fichiers sont disponibles ici :',
-    image: 'Image',
-    audio: 'Audio',
-    pdf: 'PDF',
-    signedNotice: 'Ces liens signes restent valides pendant 30 jours.',
-    fallbackName: 'Votre totem',
+    subject: "Votre coffret TOTEM ANCESTRAL est pret",
+    ready: "Votre coffret digital est pret.",
+    linksIntro: "Vos fichiers sont disponibles ici :",
+    image: "Image",
+    audio: "Audio",
+    pdf: "PDF",
+    signedNotice: "Ces liens signes restent valides pendant 30 jours.",
+    fallbackName: "Votre totem",
   };
 }
 
@@ -235,13 +240,13 @@ function renderFailureEmail(orderId: string, error: string): string {
 
 function escapeHtml(value: string): string {
   return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function escapeAttribute(value: string): string {
-  return escapeHtml(value).replaceAll('`', '&#96;');
+  return escapeHtml(value).replaceAll("`", "&#96;");
 }

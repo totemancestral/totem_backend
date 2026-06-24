@@ -4,7 +4,7 @@ import { Prisma, TotemOrder, TotemOrderStatus } from "@prisma/client";
 import { Job } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
 import { TOTEM_QUEUE } from "./totem.constants";
-import { BrevoMailerService } from "./brevo-mailer.service";
+import { ResendMailerService } from "./resend-mailer.service";
 import { SupabaseStorageService } from "./supabase-storage.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemAiService } from "./totem-ai.service";
@@ -23,7 +23,7 @@ export class TotemWorker extends WorkerHost {
     private readonly generation: TotemAiService,
     private readonly storage: SupabaseStorageService,
     private readonly mirror: SupabaseMirrorService,
-    private readonly mailer: BrevoMailerService,
+    private readonly mailer: ResendMailerService,
   ) {
     super();
   }

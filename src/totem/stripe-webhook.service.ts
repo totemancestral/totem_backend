@@ -241,16 +241,32 @@ export class StripeWebhookService {
       const existing = await tx.totemOrder.findFirst({
         where: {
           OR: [
+            ...(input.metadata.externalCommandId ? [{ id: input.metadata.externalCommandId }] : []),
             { checkoutSessionId: input.checkoutSessionId },
             ...(input.paymentIntentId ? [{ paymentIntentId: input.paymentIntentId }] : []),
           ],
         },
       });
 
-      if (existing) return existing;
+      if (existing) {
+        return tx.totemOrder.update({
+          where: { id: existing.id },
+          data: {
+            customerEmail: input.metadata.email ?? existing.customerEmail,
+            customerName: input.customerName ?? existing.customerName,
+            paymentIntentId: input.paymentIntentId ?? existing.paymentIntentId,
+            amountCents: input.amountCents ?? existing.amountCents,
+            currency: input.currency?.toUpperCase() ?? existing.currency,
+            country: input.country ?? existing.country,
+            locale: input.metadata.locale ?? existing.locale,
+            offer: input.metadata.offer ?? existing.offer,
+          },
+        });
+      }
 
       return tx.totemOrder.create({
         data: {
+          id: input.metadata.externalCommandId,
           userId: input.metadata.userId,
           customerEmail: input.metadata.email,
           customerName: input.customerName,
