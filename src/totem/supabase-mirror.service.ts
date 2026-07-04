@@ -56,7 +56,12 @@ export class SupabaseMirrorService {
       langue: input.order.locale ?? "fr",
     };
 
-    const { error } = await this.supabase.from("commandes").update(patch).eq("id", commandId);
+    let { error } = await this.supabase.from("commandes").update(patch).eq("id", commandId);
+    if (error && isMissingColumnError(error.message, "pays")) {
+      delete patch.pays;
+      const retry = await this.supabase.from("commandes").update(patch).eq("id", commandId);
+      error = retry.error;
+    }
     if (error) throw new Error(`supabase_command_paid_failed:${error.message}`);
 
     return commandId;
@@ -99,6 +104,19 @@ export class SupabaseMirrorService {
         source: "totem-backend",
         totemOrderId: input.order.id,
         archetypeId: input.text.archetypeId,
+        nomComplet: input.text.ancestralName,
+        workTitleFr: input.text.workTitleFr,
+        workTitleEn: input.text.workTitleEn,
+        people: input.text.people,
+        region: input.text.region,
+        scores: input.text.scores,
+        dominant: input.text.dominant,
+        secondary: input.text.secondary,
+        narrativeVariant: input.text.narrativeVariant,
+        visualFrame: input.text.visualFrame,
+        share: input.text.shareMessages,
+        langue: input.order.locale ?? "fr",
+        offre: input.order.offer,
         imageKey: input.image.key,
         audioKey: input.audio.key,
         pdfKey: input.pdf.key,
@@ -181,24 +199,33 @@ export class SupabaseMirrorService {
     const existing = await this.findCommandId(input.order, input.externalCommandId);
     if (existing) return existing;
 
-    const { data, error } = await this.supabase
+    const command: Record<string, unknown> = {
+      user_id: input.order.userId,
+      offre: input.order.offer,
+      statut: "paye",
+      montant_cents: input.amountCents ?? input.order.amountCents ?? 0,
+      devise: (input.currency ?? input.order.currency ?? "EUR").toUpperCase(),
+      stripe_session_id: input.order.checkoutSessionId,
+      stripe_payment_intent_id: input.paymentIntentId ?? input.order.paymentIntentId,
+      pays: input.country ?? input.order.country,
+      langue: input.order.locale ?? "fr",
+    };
+
+    let result = await this.supabase
       .from("commandes")
-      .insert({
-        user_id: input.order.userId,
-        offre: input.order.offer,
-        statut: "paye",
-        montant_cents: input.amountCents ?? input.order.amountCents ?? 0,
-        devise: (input.currency ?? input.order.currency ?? "EUR").toUpperCase(),
-        stripe_session_id: input.order.checkoutSessionId,
-        stripe_payment_intent_id: input.paymentIntentId ?? input.order.paymentIntentId,
-        pays: input.country ?? input.order.country,
-        langue: input.order.locale ?? "fr",
-      })
+      .insert(command)
       .select("id")
       .single();
 
-    if (error || !data) throw new Error(`supabase_command_create_failed:${error?.message}`);
-    return data.id as string;
+    if (result.error && isMissingColumnError(result.error.message, "pays")) {
+      delete command.pays;
+      result = await this.supabase.from("commandes").insert(command).select("id").single();
+    }
+
+    if (result.error || !result.data) {
+      throw new Error(`supabase_command_create_failed:${result.error?.message}`);
+    }
+    return result.data.id as string;
   }
 
   private async insertOeuvre(oeuvre: Record<string, unknown>): Promise<string> {
@@ -225,32 +252,37 @@ export class SupabaseMirrorService {
     text: TotemTextPayload;
     image: StoredArtefact;
   }): Promise<void> {
-    const { data: existing, error: lookupError } = await this.supabase
-      .from("oeuvre_versions")
-      .select("id")
-      .eq("oeuvre_id", input.oeuvreId)
-      .eq("version", 1)
-      .eq("type", "full")
-      .maybeSingle();
+    try {
+      const { data: existing, error: lookupError } = await this.supabase
+        .from("oeuvre_versions")
+        .select("id")
+        .eq("oeuvre_id", input.oeuvreId)
+        .eq("version", 1)
+        .eq("type", "full")
+        .maybeSingle();
 
-    if (lookupError) throw new Error(`supabase_version_lookup_failed:${lookupError.message}`);
+      if (lookupError) throw new Error(`supabase_version_lookup_failed:${lookupError.message}`);
 
-    const version = {
-      oeuvre_id: input.oeuvreId,
-      user_id: input.userId,
-      version: 1,
-      type: "full",
-      recit: composeDeliveredStory(input.text),
-      nom_totem: input.text.ancestralName,
-      image_url: input.image.url,
-      is_current: true,
-    };
+      const version = {
+        oeuvre_id: input.oeuvreId,
+        user_id: input.userId,
+        version: 1,
+        type: "full",
+        recit: composeDeliveredStory(input.text),
+        nom_totem: input.text.ancestralName,
+        image_url: input.image.url,
+        is_current: true,
+      };
 
-    const result = existing
-      ? await this.supabase.from("oeuvre_versions").update(version).eq("id", existing.id)
-      : await this.supabase.from("oeuvre_versions").insert(version);
+      const result = existing
+        ? await this.supabase.from("oeuvre_versions").update(version).eq("id", existing.id)
+        : await this.supabase.from("oeuvre_versions").insert(version);
 
-    if (result.error) throw new Error(`supabase_version_mirror_failed:${result.error.message}`);
+      if (result.error) throw new Error(`supabase_version_mirror_failed:${result.error.message}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(`supabase_version_mirror_skipped:${message}`);
+    }
   }
 
   private async findCommandId(
@@ -297,4 +329,9 @@ function composeDeliveredStory(text: TotemTextPayload): string {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function isMissingColumnError(message: string, column: string): boolean {
+  const lower = message.toLowerCase();
+  return lower.includes(column.toLowerCase()) && lower.includes("column");
 }

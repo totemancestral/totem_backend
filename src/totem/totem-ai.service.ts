@@ -14,7 +14,13 @@ import { join } from "node:path";
 import { z } from "zod";
 import { textPayloadSchema } from "./totem.schemas";
 import { allowedTotemAnimalNames, selectTotemAnimal, TotemAnimal } from "./totem-animals";
-import { containsAnimalName, normalizeTotemTitle } from "./totem-name";
+import { normalizeTotemTitle } from "./totem-name";
+import {
+  buildAdultV3Context,
+  buildAdultV3FallbackPayload,
+  buildAdultV3GenerationPrompt,
+  normalizeAdultV3Response,
+} from "./totem-v3-pipeline";
 import {
   GeneratedArtefact,
   QuestionnaireAnswer,
@@ -101,11 +107,11 @@ export class TotemAiService {
     this.openAiImageModel = config.getOrThrow<string>("OPENAI_IMAGE_MODEL");
     this.openAiTtsModel = config.getOrThrow<string>("OPENAI_TTS_MODEL");
     this.openAiTtsVoice = config.getOrThrow<string>("OPENAI_TTS_VOICE");
-    this.storyPageCount = config.get<number>("TOTEM_STORY_PAGE_COUNT") ?? 20;
+    this.storyPageCount = Math.min(config.get<number>("TOTEM_STORY_PAGE_COUNT") ?? 5, 5);
   }
 
   async generateText(payload: TextRequest): Promise<TotemTextPayload> {
-    const selectedAnimal = selectTotemAnimal(payload.answers);
+    const context = buildAdultV3Context(payload);
     const response = await fetchWithTimeout(
       "https://api.anthropic.com/v1/messages",
       {
@@ -117,13 +123,14 @@ export class TotemAiService {
         },
         body: JSON.stringify({
           model: this.anthropicModel,
-          max_tokens: 12_000,
+          max_tokens: 5_000,
           temperature: 0.85,
-          system: buildTextSystemPrompt(payload.locale, this.storyPageCount, selectedAnimal),
+          system:
+            "Tu es le moteur V3 de TOTEM ANCESTRAL. Reponds uniquement en JSON strict valide, sans Markdown.",
           messages: [
             {
               role: "user",
-              content: buildTextUserPrompt(payload, selectedAnimal),
+              content: buildAdultV3GenerationPrompt(context),
             },
           ],
         }),
@@ -139,7 +146,11 @@ export class TotemAiService {
       .join("\n")
       .trim();
 
-    return enforceSelectedAnimal(textPayloadSchema.parse(parseJsonObject(content)), selectedAnimal);
+    try {
+      return normalizeAdultV3Response(parseJsonObject(content), context);
+    } catch {
+      return buildAdultV3FallbackPayload(context);
+    }
   }
 
   buildStoryPages(text: TotemTextPayload): TotemStoryPage[] {
@@ -173,9 +184,9 @@ export class TotemAiService {
         },
         body: JSON.stringify({
           model: this.openAiImageModel,
-          prompt: buildTotemSculpturePrompt(payload.prompt),
-          size: "1024x1024",
-          quality: "low",
+          prompt: buildNgilMaskTotemPrompt(payload.prompt, payload.archetypeId),
+          size: "1024x1360",
+          quality: "medium",
           n: 1,
         }),
       },
@@ -268,41 +279,47 @@ export class TotemAiService {
 
 function buildTextSystemPrompt(
   locale?: string | null,
-  storyPageCount = 20,
+  storyPageCount = 5,
   selectedAnimal?: TotemAnimal,
 ): string {
   const language = locale?.startsWith("en") ? "anglais" : "francais";
   const animalName = selectedAnimal?.name ?? "animal selectionne";
+  const people = selectedAnimal?.people ?? "peuple inspirant africain";
+  const region = selectedAnimal?.region ?? "Afrique";
+  const quality = selectedAnimal?.quality ?? "presence";
 
-  return `Tu es le moteur editorial de TOTEM ANCESTRAL. Tu crees un coffret digital spirituel et poetique a partir de dix reponses utilisateur.
+  return `Tu es le moteur editorial de TOTEM ANCESTRAL, une maison de creation artistique.
+
+Tu crees une oeuvre artistique et symbolique a partir de dix reponses utilisateur. Ce n'est pas de la genealogie, ni de la science, ni de la divination. C'est une fable.
 
 Reponds uniquement avec un objet JSON valide, sans Markdown, sans commentaire, avec exactement ces cles :
 {
-  "archetypeId": "slug-court-en-minuscules",
-  "ancestralName": "Nom public du totem",
-  "parchmentText": "Texte long de parchemin",
-  "audioMessage": "Introduction courte destinee a la narration audio",
-  "imagePrompt": "Prompt image detaille pour OpenAI, sans texte dans l'image",
+  "archetypeId": "${selectedAnimal?.slug ?? "slug-court-en-minuscules"}",
+  "ancestralName": "Nom ancestral compose unique au format [Prenom A]-[Prenom B], [Titre poetique]",
+  "parchmentText": "Parchemin Ancestral de 1500 a 1800 caracteres, 5 mouvements separes par doubles sauts de ligne",
+  "audioMessage": "Script audio de 130 a 160 mots, pret pour voix synthetique",
+  "imagePrompt": "Prompt image Ngil detaille, sans texte dans l'image",
   "storyPages": [
-    { "page": 1, "title": "Titre de scene", "text": "Texte narratif de cette page", "imagePrompt": "Prompt image de cette page, sans texte dans l'image" }
+    { "page": 1, "title": "L'Ouverture", "text": "Mouvement 1 isole", "imagePrompt": "Prompt image de ce mouvement, sans texte dans l'image" }
   ]
 }
 
 Contraintes :
 - Langue de sortie : ${language}.
-- Ton : griot ancestral, mystique, intime, noble, jamais caricatural.
-- Liste autorisee des animaux totems : ${allowedTotemAnimalNames()}.
-- Le totem animal central obligatoire est : ${animalName}. Tu ne dois choisir aucun autre animal central.
-- Le totem doit etre identifiable et stable dans tout le coffret : ${animalName} apparait dans le recit, le nom public, le prompt de couverture et les prompts de pages.
-- parchmentText : prologue rituel de 1200 a 1800 caracteres, paragraphes separes par des doubles sauts de ligne.
-- storyPages : exactement ${storyPageCount} objets, numerotes de 1 a ${storyPageCount}.
-- Chaque storyPages[i].text : 320 a 520 caracteres, autonome, narratif, concordant avec l'univers du recit, et toujours relie au meme totem.
-- Chaque storyPages[i].imagePrompt : decrire un fragment visuel de l'univers du recit, avec le meme animal totem reconnaissable sous forme de sculpture/artefact rituel noir, bronze et or, gravures ancestrales, sans typographie ni mot visible.
-- L'ensemble des storyPages forme un long recit continu; evite les repetitions et garde une progression narrative claire.
-- audioMessage : 500 a 900 caracteres, naturel a lire a voix haute, comme ouverture avant la grande histoire.
-- imagePrompt : decrire la couverture carree, symbolique, premium, avec le meme totem en sculpture rituelle noire/bronze/or, sans typographie ni mot visible.
-- archetypeId : ASCII, kebab-case, stable.
-- ancestralName : court, memorisable, sans emoji. Ne repete jamais deux fois le nom de l'animal dans ce titre.`;
+- Ton : plume de griot, mystique, intime, noble, jamais caricatural.
+- Liste autorisee des archetypes : ${allowedTotemAnimalNames()}.
+- L'archetype central obligatoire est : ${animalName}. Tu ne dois choisir aucun autre animal central.
+- Peuple inspirant : ${people} (${region}). Qualite principale : ${quality}.
+- archetypeId : exactement "${selectedAnimal?.slug ?? "slug-court-en-minuscules"}".
+- ancestralName : nom compose unique. Il doit aller au-dela du simple animal.
+- parchmentText : 1500 a 1800 caracteres espaces compris, structure en 5 mouvements.
+- Mouvements obligatoires : L'Ouverture, Le Portrait, L'Epreuve, La Transmission, Le Passage.
+- storyPages : exactement ${storyPageCount} objets, numerotes de 1 a ${storyPageCount}, reprenant les mouvements du parchemin.
+- Si ${storyPageCount} > 5, les pages supplementaires prolongent le meme recit sans changer d'archetype.
+- Chaque storyPages[i].imagePrompt : meme totem sous forme de portrait ancestral coupe en deux, moitie gauche visage realiste de l'animal totem, moitie droite masque Ngil Fang stylise, sans typographie ni mot visible.
+- audioMessage : 130 a 160 mots, phrases courtes, pauses avec "..." ou retours ligne, ton pose, grave et doux.
+- imagePrompt : doit respecter ce format visuel : Portrait ancestral puissant, visage coupe en deux : moitie gauche visage realiste de ${animalName}, moitie droite masque Ngil Fang traditionnel africain stylise avec yeux blancs et motifs geometriques, fusion harmonieuse au milieu du visage, peau avec cicatrices rituelles dorees, ambiance sombre mystique, eclairage dramatique cinematographique, style artistique premium africain, tres detaille, haute resolution, 8k --ar 3:4 --stylize 250 --v 6.
+- Interdits : texte visible dans l'image, logos, watermark, verite scientifique ou ethnique, divination, emojis.`;
 }
 
 function buildTextUserPrompt(payload: TextRequest, selectedAnimal: TotemAnimal): string {
@@ -328,10 +345,7 @@ function enforceSelectedAnimal(
   selectedAnimal: TotemAnimal,
 ): TotemTextPayload {
   const name = selectedAnimal.name;
-  const normalizedTitle = normalizeTotemTitle(text.ancestralName, name);
-  const ancestralName = containsAnimalName(normalizedTitle, name)
-    ? normalizedTitle
-    : normalizeTotemTitle(`${name} ${normalizedTitle}`, name);
+  const ancestralName = normalizeTotemTitle(text.ancestralName, name);
   const instruction = `Animal totem obligatoire et reconnaissable: ${name}.`;
 
   return {
@@ -376,18 +390,7 @@ function ensureStoryPages(text: TotemTextPayload, minimumCount: number): TotemSt
 }
 
 function buildAudioNarration(text: TotemTextPayload, minimumCount: number): string {
-  const pages = ensureStoryPages(text, minimumCount);
-  const sections = [
-    text.audioMessage,
-    text.parchmentText,
-    ...pages.map((page) => `${page.title}. ${page.text}`),
-  ];
-
-  return sections
-    .map((section) => section.trim())
-    .filter(Boolean)
-    .join("\n\n")
-    .slice(0, 28_000);
+  return text.audioMessage.trim() || text.parchmentText.slice(0, 1400);
 }
 
 function buildPrimaryStoryImagePrompt(text: TotemTextPayload, pages: TotemStoryPage[]): string {
@@ -401,8 +404,9 @@ function buildPrimaryStoryImagePrompt(text: TotemTextPayload, pages: TotemStoryP
     `Main story illustration for the long ancestral tale of ${text.ancestralName} (${text.archetypeId}).`,
     "This is the second and only interior image of the delivered parchment: it must summarize the spiritual universe of the story without trying to show every chapter.",
     excerpt,
-    "The same animal totem must appear as a carved ritual sculpture, central and recognizable, carrying memory, protection and revelation.",
-    "Premium ancestral sculpture artwork, cinematic composition, sacred atmosphere, no letters, no typography, no visible words, no watermark.",
+    buildNgilMaskTotemPrompt("", text.archetypeId),
+    "The same split-face totem must remain central and recognizable, carrying memory, protection and revelation.",
+    "No letters, no typography, no visible words, no watermark.",
   ].join("\n");
 }
 
@@ -410,19 +414,25 @@ function buildSceneImagePrompt(text: TotemTextPayload, page: TotemStoryPage): st
   return [
     page.imagePrompt,
     `Central totem: ${text.ancestralName} (${text.archetypeId}).`,
-    "The same animal/archetype must be recognizable across every page as a carved ritual sculpture, but the scene, environment, lighting and symbolic universe must match this page text.",
+    "The same split-face Ngil totem must be recognizable across every page, but the scene, environment, lighting and symbolic universe must match this page text.",
     `Page text to illustrate: ${page.text.slice(0, 900)}`,
-    "Premium ancestral sculpture artwork, cinematic composition, sacred atmosphere, no letters, no typography, no visible words, no watermark.",
+    buildNgilMaskTotemPrompt("", text.archetypeId),
+    "No letters, no typography, no visible words, no watermark.",
   ].join("\n");
 }
 
-function buildTotemSculpturePrompt(prompt: string): string {
+function buildNgilMaskTotemPrompt(prompt: string, archetypeId: string): string {
+  const leftFace = animalLeftFace(archetypeId);
+
   return [
     prompt,
-    "Mandatory visual style: the animal totem must be a premium sculptural artefact, not a flat illustration. Materials: carved black ebony or obsidian, aged bronze, dark metal and fine gold inlays. Surface: engraved geometric ancestral patterns, ritual symbols, hand-carved relief, polished edges, visible depth and craft.",
-    "Composition: centered full-body statue or ceremonial object, dramatic product-photography lighting, deep blue-black background, subtle floating golden dust, high contrast, crisp details, museum-grade sacred artefact, cinematic realism.",
-    "Do not generate text, letters, logos, watermark, labels, UI, human faces, modern objects or cartoon style.",
-  ].join("\n");
+    `Mandatory visual style: Portrait ancestral puissant, visage coupe en deux : moitie gauche ${leftFace}, moitie droite masque Ngil Fang traditionnel africain stylise avec yeux blancs et motifs geometriques.`,
+    "Fusion harmonieuse au milieu du visage, peau avec cicatrices rituelles dorees, ambiance sombre mystique, eclairage dramatique cinematographique, style artistique premium africain, tres detaille, haute resolution, 8k.",
+    "Composition verticale 3:4, centered close-up portrait, deep black #0D0D1A, ancestral gold #C9A84C, ochre, indigo, ivory, premium museum artwork.",
+    "Do not generate text, letters, logos, watermark, labels, UI, modern objects or cartoon style. --ar 3:4 --stylize 250 --v 6",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function fallbackScenePrompt(text: TotemTextPayload, page: number): string {
@@ -440,7 +450,40 @@ function fallbackScenePrompt(text: TotemTextPayload, page: number): string {
   ];
   const realm = realms[(page - 1) % realms.length];
 
-  return `Illustrate page ${page} of a long ancestral story: the same totem animal ${text.ancestralName} appears as a carved black, bronze and gold ritual sculpture in ${realm}, carrying memory, protection and revelation. Premium symbolic artefact artwork, no text, no typography.`;
+  return `Illustrate page ${page} of a long ancestral story: the same totem ${text.ancestralName} appears as a split-face Ngil ancestral portrait in ${realm}, left half realistic animal face, right half stylized Fang Ngil mask, golden ritual scarifications, dramatic cinematic light, premium African artwork, no text, no typography.`;
+}
+
+function animalLeftFace(archetypeId: string): string {
+  const labels: Record<string, string> = {
+    lion: "visage de lion realiste avec criniere noire et regard percant",
+    lionne: "visage de lionne realiste avec regard protecteur et traits royaux",
+    rhinoceros: "visage de rhinoceros realiste avec corne sculpturale et peau minerale",
+    crocodile: "visage de crocodile realiste avec ecailles profondes et regard ancien",
+    serpent: "visage de serpent realiste avec ecailles vert sombre et regard hypnotique",
+    dauphin: "visage de dauphin realiste avec peau bleutee et regard lumineux",
+    elephant: "visage d'elephant realiste avec defenses sculpturales et regard ancestral",
+    baobab: "visage anthropomorphe de baobab realiste avec ecorce massive et racines sculptees",
+    zebre: "visage de zebre realiste avec rayures nettes et regard calme",
+    perroquet: "visage de perroquet realiste avec plumage vert et or et regard vif",
+    aigle: "visage d'aigle realiste avec bec royal et regard percant",
+    leopard: "visage de leopard realiste avec taches sombres et regard precis",
+    python: "visage de python realiste avec ecailles profondes et regard ancien",
+    panthere: "visage de panthere noire realiste avec regard precis et silhouette d'ombre",
+    guepard: "visage de guepard realiste avec marques lacrymales et regard rapide",
+    hyene: "visage de hyene realiste avec machoire puissante et regard inquietant",
+    buffle: "visage de buffle realiste avec cornes massives et regard ancre",
+    hippopotame: "visage d'hippopotame realiste avec peau sombre et puissance tranquille",
+    girafe: "visage de girafe realiste avec motifs ocres et regard eleve",
+    gorille: "visage de gorille realiste avec front puissant et regard profond",
+    chimpanze: "visage de chimpanze realiste avec regard vif et intelligence calme",
+    faucon: "visage de faucon realiste avec bec tranchant et regard libre",
+    tortue: "visage de tortue realiste avec carapace ancienne et regard patient",
+    "grue-couronnee": "visage de grue couronnee realiste avec couronne doree et regard elegant",
+  };
+
+  if (labels[archetypeId]) return labels[archetypeId];
+  const readable = archetypeId.replace(/-/g, " ");
+  return `visage realiste du totem ${readable} avec details anatomiques precis et regard ancestral`;
 }
 
 function splitTextIntoChunks(text: string, count: number): string[] {

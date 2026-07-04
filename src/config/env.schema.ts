@@ -17,7 +17,7 @@ export const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   REDIS_URL: z.string().min(1),
   TOTEM_WORKER_CONCURRENCY: z.coerce.number().int().positive().max(50).default(2),
-  TOTEM_STORY_PAGE_COUNT: z.coerce.number().int().min(20).max(40).default(20),
+  TOTEM_STORY_PAGE_COUNT: z.coerce.number().int().min(5).max(10).default(5),
   TOTEM_IMAGE_GENERATION_CONCURRENCY: z.coerce.number().int().positive().max(4).default(2),
   STRIPE_SECRET_KEY: optionalString,
   STRIPE_WEBHOOK_SECRET: optionalString,

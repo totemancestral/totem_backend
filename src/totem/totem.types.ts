@@ -30,6 +30,20 @@ export type TotemTextPayload = {
   audioMessage: string;
   imagePrompt: string;
   storyPages: TotemStoryPage[];
+  shareMessages?: {
+    captionLinkedin: string;
+    messageWhatsapp: string;
+    messageClan: string;
+  };
+  workTitleFr?: string;
+  workTitleEn?: string;
+  people?: string;
+  region?: string;
+  scores?: Record<"F" | "E" | "T" | "A", number>;
+  dominant?: "F" | "E" | "T" | "A";
+  secondary?: "F" | "E" | "T" | "A";
+  narrativeVariant?: "A" | "B" | "C" | "D";
+  visualFrame?: 1 | 2 | 3 | 4 | 5;
 };
 
 export type GeneratedArtefact = {
