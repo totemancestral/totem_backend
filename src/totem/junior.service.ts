@@ -1,5 +1,7 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { z } from 'zod';
+import { PrismaService } from '../prisma/prisma.service';
+import { SupabaseAuthService } from './supabase-auth.service';
 
 type Choice = 'A' | 'B' | 'C' | 'D';
 type QuestionNumber = 1 | 2 | 3 | 4 | 5;
@@ -97,30 +99,71 @@ const qualities: Record<string, string> = {
 
 @Injectable()
 export class JuniorService {
-  reveal(body: unknown) {
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auth: SupabaseAuthService,
+  ) {}
+
+  async reveal(body: unknown, authorization?: string) {
     const parsed = juniorInputSchema.safeParse(body);
     if (!parsed.success) {
       throw new BadRequestException('junior_payload_invalid');
     }
 
-    const scores: Scores = { F: 0, E: 0, T: 0, A: 0 };
-    for (const question of questionNumbers) {
-      const choice = parsed.data.answers[String(question)]?.choice;
-      if (!choice) throw new BadRequestException('junior_answers_incomplete');
-      const questionScores = scoring[question][choice];
-      for (const dimension of dimensions) {
-        scores[dimension] += questionScores[dimension];
+    const scores = computeScores(parsed.data.answers);
+    const { dominant, secondary, name, quality, orderNumber, phrase, share } = computeReveal(
+      scores,
+      parsed.data.firstName,
+    );
+
+    let userId: string | undefined;
+    if (authorization) {
+      try {
+        const user = await this.auth.requireUser(authorization);
+        userId = user.id;
+
+        await this.prisma.userProfile.upsert({
+          where: { id: userId },
+          create: {
+            id: userId,
+            role: 'junior',
+            firstName: parsed.data.firstName || undefined,
+            locale: parsed.data.locale || undefined,
+          },
+          update: {},
+        });
+
+        const juniorTotem = await this.prisma.juniorTotem.create({
+          data: {
+            userId,
+            answers: parsed.data.answers as object,
+            scores,
+            dominant,
+            secondary,
+            totemName: name,
+            quality,
+            phrase,
+            orderNumber,
+          },
+        });
+
+        return {
+          id: juniorTotem.id,
+          type: 'junior',
+          firstName: parsed.data.firstName || 'Toi',
+          orderNumber,
+          scores,
+          dominant,
+          secondary,
+          totem: { name, quality },
+          phrase,
+          share,
+          saved: true,
+        };
+      } catch {
+        // Token invalid — return anonymous result
       }
     }
-
-    const sorted = [...dimensions]
-      .map((dimension) => ({ dimension, score: scores[dimension] }))
-      .sort((left, right) => right.score - left.score);
-    const dominant = sorted[0]?.dimension ?? 'F';
-    const secondary = sorted.find((item) => item.dimension !== dominant)?.dimension ?? dominant;
-    const name = attribution[dominant][secondary] ?? attribution[dominant][dominant];
-    const quality = qualities[name] ?? 'Presence';
-    const orderNumber = (hash(JSON.stringify(parsed.data.answers)) % 999999) + 1;
 
     return {
       type: 'junior',
@@ -129,17 +172,92 @@ export class JuniorService {
       scores,
       dominant,
       secondary,
-      totem: {
-        name,
-        quality,
-      },
-      phrase: `Avant toi, un ancetre portait ${qualityPhrase(quality)} dans son geste, et ce signe avance maintenant avec ton nom.`,
-      share: {
-        caption: `${name}\nQuel ancetre dort en toi ?\n#RevealYourTotem`,
-        messageDefi: `J'ai decouvert mon totem ancestral : ${name}. Toi, tu es quoi ? totemancestral.com`,
-      },
+      totem: { name, quality },
+      phrase,
+      share,
+      saved: false,
     };
   }
+
+  async listTotems(authorization: string) {
+    const user = await this.auth.requireUser(authorization);
+    return this.prisma.juniorTotem.findMany({
+      where: { userId: user.id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        totemName: true,
+        quality: true,
+        phrase: true,
+        orderNumber: true,
+        shareCount: true,
+        createdAt: true,
+        scores: true,
+        dominant: true,
+        secondary: true,
+      },
+    });
+  }
+
+  async shareTotem(id: string, authorization: string) {
+    const user = await this.auth.requireUser(authorization);
+    const totem = await this.prisma.juniorTotem.findUnique({
+      where: { id },
+    });
+    if (!totem || totem.userId !== user.id) {
+      throw new NotFoundException('junior_totem_not_found');
+    }
+    return this.prisma.juniorTotem.update({
+      where: { id },
+      data: { shareCount: { increment: 1 } },
+      select: {
+        id: true,
+        totemName: true,
+        quality: true,
+        phrase: true,
+        orderNumber: true,
+        shareCount: true,
+      },
+    });
+  }
+}
+
+function computeScores(answers: Record<string, { choice: string }>): Scores {
+  const scores: Scores = { F: 0, E: 0, T: 0, A: 0 };
+  for (const question of questionNumbers) {
+    const choice = answers[String(question)]?.choice as Choice;
+    if (!choice) throw new BadRequestException('junior_answers_incomplete');
+    const questionScores = scoring[question][choice];
+    for (const dimension of dimensions) {
+      scores[dimension] += questionScores[dimension];
+    }
+  }
+  return scores;
+}
+
+function computeReveal(scores: Scores, firstName?: string) {
+  const sorted = [...dimensions]
+    .map((dimension) => ({ dimension, score: scores[dimension] }))
+    .sort((left, right) => right.score - left.score);
+  const dominant = sorted[0]?.dimension ?? 'F';
+  const secondary = sorted.find((item) => item.dimension !== dominant)?.dimension ?? dominant;
+  const name = attribution[dominant][secondary] ?? attribution[dominant][dominant];
+  const quality = qualities[name] ?? 'Presence';
+  const orderNumber = (hash(JSON.stringify(scores)) % 999999) + 1;
+  const phrase = `Avant toi, un ancetre portait ${qualityPhrase(quality)} dans son geste, et ce signe avance maintenant avec ton nom.`;
+
+  return {
+    dominant,
+    secondary,
+    name,
+    quality,
+    orderNumber,
+    phrase,
+    share: {
+      caption: `${name}\nQuel ancetre dort en toi ?\n#RevealYourTotem`,
+      messageDefi: `J'ai decouvert mon totem ancestral : ${name}. Toi, tu es quoi ? totemancestral.com`,
+    },
+  };
 }
 
 function qualityPhrase(quality: string) {
@@ -157,7 +275,6 @@ function qualityPhrase(quality: string) {
     Intensite: "l'intensite",
     Patience: 'la patience',
   };
-
   return phrases[quality] ?? quality.toLowerCase();
 }
 
