@@ -18,7 +18,9 @@ services:
         sync: false
       - key: DATABASE_URL
         sync: false
-      - key: REDIS_URL
+      - key: UPSTASH_REDIS_URL
+        sync: false
+      - key: UPSTASH_REDIS_TOKEN
         sync: false
       - key: TOTEM_WORKER_CONCURRENCY
         value: 2

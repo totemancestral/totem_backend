@@ -1,4 +1,3 @@
-import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { HealthController } from "../health.controller";
 import { PrismaModule } from "../prisma/prisma.module";
@@ -13,7 +12,6 @@ import { SupabaseAuthService } from "./supabase-auth.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { SupabaseStorageService } from "./supabase-storage.service";
 import { TotemAiService } from "./totem-ai.service";
-import { TOTEM_QUEUE } from "./totem.constants";
 import { TotemAssetsController } from "./totem-assets.controller";
 import { TotemOrdersController } from "./totem-orders.controller";
 import { TotemOrdersService } from "./totem-orders.service";
@@ -23,14 +21,6 @@ import { TotemWorker } from "./totem.worker";
 @Module({
   imports: [
     PrismaModule,
-    BullModule.registerQueue({
-      name: TOTEM_QUEUE,
-      streams: {
-        events: {
-          maxLen: 10_000,
-        },
-      },
-    }),
   ],
   controllers: [
     CheckoutController,

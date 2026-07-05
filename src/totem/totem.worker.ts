@@ -1,37 +1,72 @@
-import { Processor, WorkerHost } from "@nestjs/bullmq";
-import { Injectable } from "@nestjs/common";
+import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { Prisma, TotemOrder, TotemOrderStatus } from "@prisma/client";
-import { Job } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
-import { TOTEM_QUEUE } from "./totem.constants";
 import { ResendMailerService } from "./resend-mailer.service";
-import { SupabaseStorageService } from "./supabase-storage.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
+import { SupabaseStorageService } from "./supabase-storage.service";
 import { TotemAiService } from "./totem-ai.service";
-import { QuestionnaireAnswer, TotemJobPayload } from "./totem.types";
-
-const workerConcurrency = readWorkerConcurrency();
+import { TotemQueueService } from "./totem-queue.service";
+import { QuestionnaireAnswer } from "./totem.types";
 
 @Injectable()
-@Processor(TOTEM_QUEUE, {
-  concurrency: workerConcurrency,
-  lockDuration: 90 * 60 * 1000,
-})
-export class TotemWorker extends WorkerHost {
+export class TotemWorker implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger(TotemWorker.name);
+  private readonly pollIntervalMs: number;
+  private readonly concurrency: number;
+  private activeJobs = 0;
+  private timer: ReturnType<typeof setInterval> | null = null;
+  private running = false;
+
   constructor(
     private readonly prisma: PrismaService,
+    private readonly queue: TotemQueueService,
     private readonly generation: TotemAiService,
     private readonly storage: SupabaseStorageService,
     private readonly mirror: SupabaseMirrorService,
     private readonly mailer: ResendMailerService,
+    config: ConfigService,
   ) {
-    super();
+    this.pollIntervalMs = config.get<number>("TOTEM_POLL_INTERVAL_MS") ?? 3_000;
+    this.concurrency = Math.min(
+      Math.max(1, config.get<number>("TOTEM_WORKER_CONCURRENCY") ?? 2),
+      50,
+    );
   }
 
-  async process(job: Job<TotemJobPayload>): Promise<void> {
+  onModuleInit(): void {
+    this.running = true;
+    this.timer = setInterval(() => this.poll(), this.pollIntervalMs);
+  }
+
+  onModuleDestroy(): void {
+    this.running = false;
+    if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  private async poll(): Promise<void> {
+    if (!this.running || this.activeJobs >= this.concurrency) return;
+
+    const orderId = await this.queue.dequeue();
+    if (!orderId) return;
+
+    this.activeJobs += 1;
+    this.process(orderId)
+      .catch((error) => this.logger.error(`[order ${orderId}] ${error.message}`))
+      .finally(() => {
+        this.activeJobs -= 1;
+      });
+  }
+
+  private async process(orderId: string): Promise<void> {
+    await this.queue.markActive(orderId);
+
     try {
       const order = await this.prisma.totemOrder.findUniqueOrThrow({
-        where: { id: job.data.orderId },
+        where: { id: orderId },
       });
 
       if (order.status === TotemOrderStatus.done) {
@@ -44,7 +79,7 @@ export class TotemWorker extends WorkerHost {
         data: {
           status: TotemOrderStatus.processing,
           processingAt: new Date(),
-          attempts: job.attemptsMade + 1,
+          attempts: { increment: 1 },
           errorMessage: null,
         },
       });
@@ -123,30 +158,20 @@ export class TotemWorker extends WorkerHost {
         },
       });
 
-      await this.mirror.markDelivered({
-        order: completedOrder,
-        text,
-        image,
-        audio,
-        pdf,
-      });
-
+      await this.mirror.markDelivered({ order: completedOrder, text, image, audio, pdf });
       await this.sendDeliveryBestEffort(completedOrder, image.url, audio.url, pdf.url);
     } catch (error) {
-      await this.registerFailure(job, error);
-      throw error;
+      await this.registerFailure(orderId, error);
+    } finally {
+      await this.queue.markDone(orderId);
     }
   }
 
   private async sendDeliveryIfNeeded(order: TotemOrder): Promise<void> {
-    if (order.deliveryEmailSentAt) {
-      return;
-    }
-
+    if (order.deliveryEmailSentAt) return;
     if (!order.imageUrl || !order.audioUrl || !order.pdfUrl) {
       throw new Error("delivery_urls_missing");
     }
-
     await this.sendDeliveryBestEffort(order, order.imageUrl, order.audioUrl, order.pdfUrl);
   }
 
@@ -157,15 +182,8 @@ export class TotemWorker extends WorkerHost {
     pdfUrl: string,
   ): Promise<void> {
     try {
-      const sent = await this.mailer.sendDelivery({
-        order,
-        imageUrl,
-        audioUrl,
-        pdfUrl,
-      });
-
+      const sent = await this.mailer.sendDelivery({ order, imageUrl, audioUrl, pdfUrl });
       if (!sent) return;
-
       await this.prisma.totemOrder.update({
         where: { id: order.id },
         data: { deliveryEmailSentAt: new Date() },
@@ -182,14 +200,16 @@ export class TotemWorker extends WorkerHost {
     }
   }
 
-  private async registerFailure(job: Job<TotemJobPayload>, error: unknown): Promise<void> {
+  private async registerFailure(orderId: string, error: unknown): Promise<void> {
     const message = normalizeError(error);
-    const attempts = job.attemptsMade + 1;
-    const maxAttempts = job.opts.attempts ?? 1;
+
+    const order = await this.prisma.totemOrder.findUnique({ where: { id: orderId } });
+    const attempts = (order?.attempts ?? 0) + 1;
+    const maxAttempts = 3;
     const finalAttempt = attempts >= maxAttempts;
 
     await this.prisma.totemOrder.update({
-      where: { id: job.data.orderId },
+      where: { id: orderId },
       data: {
         status: finalAttempt ? TotemOrderStatus.error : TotemOrderStatus.pending,
         attempts,
@@ -199,20 +219,19 @@ export class TotemWorker extends WorkerHost {
 
     await this.prisma.totemPipelineError.create({
       data: {
-        orderId: job.data.orderId,
+        orderId,
         step: "pipeline",
         message,
         attempts,
       },
     });
 
-    const order = await this.prisma.totemOrder
-      .findUnique({ where: { id: job.data.orderId } })
-      .catch(() => null);
     await this.mirror.markFailed(order, message).catch(() => undefined);
 
-    if (finalAttempt) {
-      await this.mailer.sendFailureAlert(job.data.orderId, message).catch(() => undefined);
+    if (!finalAttempt) {
+      await this.queue.enqueue(orderId);
+    } else {
+      await this.mailer.sendFailureAlert(orderId, message).catch(() => undefined);
     }
   }
 }
@@ -221,16 +240,5 @@ function normalizeError(error: unknown): string {
   if (error instanceof Error) {
     return error.message.slice(0, 1000);
   }
-
   return String(error).slice(0, 1000);
-}
-
-function readWorkerConcurrency(): number {
-  const value = Number(process.env.TOTEM_WORKER_CONCURRENCY ?? 2);
-
-  if (!Number.isFinite(value) || value < 1) {
-    return 2;
-  }
-
-  return Math.min(Math.trunc(value), 50);
 }
