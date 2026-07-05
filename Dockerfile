@@ -22,4 +22,4 @@ COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
 COPY package.json ./
 EXPOSE 3000
-CMD ["node", "dist/main.js"]
+CMD timeout 30 npx prisma migrate deploy --schema=./prisma/schema.prisma 2>&1 || true; node dist/main.js

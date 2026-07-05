@@ -30,6 +30,42 @@ enum TotemPipelineStep {
   pipeline
 }
 
+model UserProfile {
+  id        String   @id
+  role      UserRole @default(adulte)
+  firstName String?
+  locale    String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  juniorTotems  JuniorTotem[]
+}
+
+enum UserRole {
+  adulte
+  junior
+}
+
+model JuniorTotem {
+  id          String   @id @default(cuid())
+  userId      String
+  answers     Json
+  scores      Json
+  dominant    String
+  secondary   String
+  totemName   String
+  quality     String
+  phrase      String
+  orderNumber Int
+  shareCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
 model TotemOrder {
   id                  String               @id @default(cuid())
   userId              String
