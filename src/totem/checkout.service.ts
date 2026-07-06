@@ -6,9 +6,10 @@ import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemOffer } from "./totem.types";
+import { computeScores, computeReveal } from "./junior.service";
 
-const checkoutInputSchema = z.object({
-  offer: z.enum(["origine", "ancestral", "famille", "junior"]),
+const adultCheckoutSchema = z.object({
+  offer: z.enum(["origine", "ancestral", "famille"]),
   externalCommandId: z.string().min(1).max(120).optional(),
   answers: z
     .array(
@@ -25,7 +26,29 @@ const checkoutInputSchema = z.object({
   cancelUrl: z.string().url().max(500).optional(),
 });
 
-export type CheckoutInput = z.infer<typeof checkoutInputSchema>;
+const juniorCheckoutSchema = z.object({
+  offer: z.literal("junior"),
+  externalCommandId: z.string().min(1).max(120).optional(),
+  firstName: z.string().trim().max(40).optional(),
+  answers: z.record(
+    z.string(),
+    z.object({
+      choice: z.enum(["A", "B", "C", "D"]),
+    }),
+  ),
+  locale: z.enum(["fr", "en"]).optional(),
+  successUrl: z.string().url().max(500).optional(),
+  cancelUrl: z.string().url().max(500).optional(),
+});
+
+const checkoutInputSchema = z.discriminatedUnion("offer", [
+  adultCheckoutSchema,
+  juniorCheckoutSchema,
+]);
+
+type AdultCheckoutInput = z.infer<typeof adultCheckoutSchema>;
+type JuniorCheckoutInput = z.infer<typeof juniorCheckoutSchema>;
+export type CheckoutInput = AdultCheckoutInput | JuniorCheckoutInput;
 
 const OFFER_LABELS: Record<TotemOffer, string> = {
   origine: "TOTEM ANCESTRAL - Origine",
@@ -62,7 +85,7 @@ export class CheckoutService {
     body: unknown;
     userId: string;
     email?: string;
-  }): Promise<{ id: string; url: string | null }> {
+  }): Promise<{ id: string; url: string | null; reveal?: Record<string, unknown> }> {
     const payload = this.readInput(input.body);
     const amount = this.offerPrices[payload.offer];
 
@@ -98,9 +121,15 @@ export class CheckoutService {
       payment_intent_data: {
         metadata: baseMetadata,
       },
-      success_url: payload.successUrl ?? this.successUrl,
+      success_url: payload.offer === "junior"
+        ? `${payload.successUrl ?? this.successUrl}&type=junior`
+        : (payload.successUrl ?? this.successUrl),
       cancel_url: payload.cancelUrl ?? this.cancelUrl,
     });
+
+    if (payload.offer === "junior") {
+      return this.createJuniorOrder({ payload, session, amount, userId: input.userId, email: input.email });
+    }
 
     const order = await this.prisma.totemOrder.create({
       data: {
@@ -133,6 +162,69 @@ export class CheckoutService {
     return { id: session.id, url: session.url };
   }
 
+  private async createJuniorOrder(input: {
+    payload: JuniorCheckoutInput;
+    session: Stripe.Checkout.Session;
+    amount: number;
+    userId: string;
+    email?: string;
+  }) {
+    const { payload, session, amount, userId, email } = input;
+
+    const scores = computeScores(payload.answers);
+    const reveal = computeReveal(scores, payload.firstName);
+
+    const order = await this.prisma.totemOrder.create({
+      data: {
+        userId,
+        customerEmail: email,
+        customerName: payload.firstName,
+        checkoutSessionId: session.id,
+        status: TotemOrderStatus.pending,
+        locale: payload.locale,
+        offer: "junior",
+        amountCents: amount,
+        currency: "EUR",
+        answers: payload.answers as unknown as Prisma.InputJsonValue,
+        juniorPayload: {
+          scores,
+          dominant: reveal.dominant,
+          secondary: reveal.secondary,
+          totemName: reveal.name,
+          quality: reveal.quality,
+          orderNumber: reveal.orderNumber,
+          phrase: reveal.phrase,
+          share: reveal.share,
+        },
+      },
+    });
+
+    await this.readStripe().checkout.sessions.update(session.id, {
+      metadata: {
+        userId,
+        ...(email ? { email } : {}),
+        ...(payload.firstName ? { prenom: payload.firstName } : {}),
+        ...(payload.locale ? { locale: payload.locale } : {}),
+        offer: "junior",
+        orderId: order.id,
+      },
+    });
+
+    return {
+      id: session.id,
+      url: session.url,
+      reveal: {
+        orderNumber: reveal.orderNumber,
+        scores,
+        dominant: reveal.dominant,
+        secondary: reveal.secondary,
+        totem: { name: reveal.name, quality: reveal.quality },
+        phrase: reveal.phrase,
+        share: reveal.share,
+      },
+    };
+  }
+
   private readInput(body: unknown): CheckoutInput {
     try {
       return checkoutInputSchema.parse(body);
@@ -158,18 +250,25 @@ export class CheckoutService {
     email?: string;
     payload: CheckoutInput;
   }): Record<string, string> {
-    return {
+    const meta: Record<string, string> = {
       userId: input.userId,
       ...(input.email ? { email: input.email } : {}),
-      ...(input.payload.customerName ? { prenom: input.payload.customerName } : {}),
-      ...(input.payload.locale ? { locale: input.payload.locale } : {}),
-      ...(input.payload.externalCommandId
-        ? {
-            externalCommandId: input.payload.externalCommandId,
-            commande_id: input.payload.externalCommandId,
-          }
-        : {}),
       offer: input.payload.offer,
     };
+
+    if (input.payload.offer === "junior") {
+      if (input.payload.firstName) meta.prenom = input.payload.firstName;
+      if (input.payload.locale) meta.locale = input.payload.locale;
+      meta.answers = JSON.stringify(input.payload.answers);
+    } else {
+      if (input.payload.customerName) meta.prenom = input.payload.customerName;
+      if (input.payload.locale) meta.locale = input.payload.locale;
+      if (input.payload.externalCommandId) {
+        meta.externalCommandId = input.payload.externalCommandId;
+        meta.commande_id = input.payload.externalCommandId;
+      }
+    }
+
+    return meta;
   }
 }

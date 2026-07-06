@@ -13,7 +13,7 @@ export class CheckoutController {
   async create(
     @Body() body: unknown,
     @Headers('authorization') authorization?: string,
-  ): Promise<{ id: string; url: string | null }> {
+  ): Promise<{ id: string; url: string | null; reveal?: Record<string, unknown> }> {
     const user = await this.auth.requireUser(authorization);
 
     return this.checkout.createSession({
