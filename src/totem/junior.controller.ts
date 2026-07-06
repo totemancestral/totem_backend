@@ -13,6 +13,14 @@ export class JuniorController {
     return this.junior.reveal(body, authorization);
   }
 
+  @Post('checkout')
+  checkout(
+    @Body() body: unknown,
+    @Headers('authorization') authorization: string,
+  ) {
+    return this.junior.createCheckoutSession(body, authorization);
+  }
+
   @Get('totems')
   listTotems(@Headers('authorization') authorization: string) {
     return this.junior.listTotems(authorization);

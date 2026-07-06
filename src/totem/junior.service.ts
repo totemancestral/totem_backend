@@ -1,4 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { Prisma, TotemOrderStatus } from '@prisma/client';
+import Stripe from 'stripe';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseAuthService } from './supabase-auth.service';
@@ -99,10 +102,22 @@ const qualities: Record<string, string> = {
 
 @Injectable()
 export class JuniorService {
+  private stripe?: Stripe;
+  private readonly stripeSecretKey?: string;
+  private readonly successUrl: string;
+  private readonly cancelUrl: string;
+  private readonly juniorPriceCents: number;
+
   constructor(
+    config: ConfigService,
     private readonly prisma: PrismaService,
     private readonly auth: SupabaseAuthService,
-  ) {}
+  ) {
+    this.stripeSecretKey = config.get<string>("STRIPE_SECRET_KEY");
+    this.successUrl = config.getOrThrow<string>("CHECKOUT_SUCCESS_URL");
+    this.cancelUrl = config.getOrThrow<string>("CHECKOUT_CANCEL_URL");
+    this.juniorPriceCents = config.getOrThrow<number>("TOTEM_PRICE_JUNIOR_CENTS");
+  }
 
   async reveal(body: unknown, authorization?: string) {
     const parsed = juniorInputSchema.safeParse(body);
@@ -179,6 +194,114 @@ export class JuniorService {
     };
   }
 
+  async createCheckoutSession(body: unknown, authorization: string) {
+    const user = await this.auth.requireUser(authorization);
+    const parsed = juniorInputSchema.safeParse(body);
+    if (!parsed.success) {
+      throw new BadRequestException('junior_payload_invalid');
+    }
+
+    const scores = computeScores(parsed.data.answers);
+    const reveal = computeReveal(scores, parsed.data.firstName);
+
+    const session = await this.readStripe().checkout.sessions.create({
+      mode: "payment",
+      customer_email: user.email,
+      client_reference_id: user.id,
+      line_items: [
+        {
+          quantity: 1,
+          price_data: {
+            currency: "eur",
+            unit_amount: this.juniorPriceCents,
+            product_data: {
+              name: "TOTEM JUNIOR",
+            },
+          },
+        },
+      ],
+      metadata: {
+        userId: user.id,
+        email: user.email ?? "",
+        locale: parsed.data.locale ?? "",
+        offer: "junior",
+        prenom: parsed.data.firstName ?? "",
+        answers: JSON.stringify(parsed.data.answers),
+      },
+      payment_intent_data: {
+        metadata: {
+          userId: user.id,
+          email: user.email ?? "",
+          locale: parsed.data.locale ?? "",
+          offer: "junior",
+          prenom: parsed.data.firstName ?? "",
+          answers: JSON.stringify(parsed.data.answers),
+        },
+      },
+      success_url: `${this.successUrl}&type=junior`,
+      cancel_url: this.cancelUrl,
+    });
+
+    const order = await this.prisma.totemOrder.create({
+      data: {
+        userId: user.id,
+        customerEmail: user.email,
+        customerName: parsed.data.firstName,
+        checkoutSessionId: session.id,
+        status: TotemOrderStatus.pending,
+        locale: parsed.data.locale,
+        offer: "junior",
+        amountCents: this.juniorPriceCents,
+        currency: "EUR",
+        answers: parsed.data.answers as unknown as Prisma.InputJsonValue,
+        juniorPayload: {
+          scores,
+          dominant: reveal.dominant,
+          secondary: reveal.secondary,
+          totemName: reveal.name,
+          quality: reveal.quality,
+          orderNumber: reveal.orderNumber,
+          phrase: reveal.phrase,
+          share: reveal.share,
+        },
+      },
+    });
+
+    await this.readStripe().checkout.sessions.update(session.id, {
+      metadata: {
+        userId: user.id,
+        email: user.email ?? "",
+        locale: parsed.data.locale ?? "",
+        offer: "junior",
+        prenom: parsed.data.firstName ?? "",
+        answers: JSON.stringify(parsed.data.answers),
+        orderId: order.id,
+      },
+    });
+
+    return {
+      id: session.id,
+      url: session.url,
+      reveal: {
+        orderNumber: reveal.orderNumber,
+        scores,
+        dominant: reveal.dominant,
+        secondary: reveal.secondary,
+        totem: { name: reveal.name, quality: reveal.quality },
+        phrase: reveal.phrase,
+        share: reveal.share,
+      },
+    };
+  }
+
+  private readStripe(): Stripe {
+    if (!this.stripeSecretKey) {
+      throw new ServiceUnavailableException("stripe_not_configured");
+    }
+    this.stripe ??= new Stripe(this.stripeSecretKey);
+    return this.stripe;
+  }
+
   async listTotems(authorization: string) {
     const user = await this.auth.requireUser(authorization);
     return this.prisma.juniorTotem.findMany({
@@ -222,7 +345,7 @@ export class JuniorService {
   }
 }
 
-function computeScores(answers: Record<string, { choice: string }>): Scores {
+export function computeScores(answers: Record<string, { choice: string }>): Scores {
   const scores: Scores = { F: 0, E: 0, T: 0, A: 0 };
   for (const question of questionNumbers) {
     const choice = answers[String(question)]?.choice as Choice;
@@ -235,7 +358,7 @@ function computeScores(answers: Record<string, { choice: string }>): Scores {
   return scores;
 }
 
-function computeReveal(scores: Scores, firstName?: string) {
+export function computeReveal(scores: Scores, firstName?: string) {
   const sorted = [...dimensions]
     .map((dimension) => ({ dimension, score: scores[dimension] }))
     .sort((left, right) => right.score - left.score);

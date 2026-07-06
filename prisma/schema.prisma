@@ -18,6 +18,7 @@ enum TotemOffer {
   origine
   ancestral
   famille
+  junior
 }
 
 enum TotemPipelineStep {
@@ -80,6 +81,7 @@ model TotemOrder {
   currency            String?
   country             String?
   answers             Json
+  juniorPayload       Json?
   textPayload         Json?
   archetypeId         String?
   ancestralName       String?

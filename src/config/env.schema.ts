@@ -33,6 +33,7 @@ export const envSchema = z.object({
   TOTEM_PRICE_ORIGINE_CENTS: z.coerce.number().int().positive(),
   TOTEM_PRICE_ANCESTRAL_CENTS: z.coerce.number().int().positive(),
   TOTEM_PRICE_FAMILLE_CENTS: z.coerce.number().int().positive(),
+  TOTEM_PRICE_JUNIOR_CENTS: z.coerce.number().int().positive().default(999),
   SUPABASE_URL: z.string().url(),
   SUPABASE_ANON_KEY: z.string().min(1),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),

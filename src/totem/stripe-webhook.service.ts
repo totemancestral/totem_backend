@@ -18,6 +18,7 @@ import {
   parseCheckoutMetadata,
 } from "./totem.schemas";
 import { CheckoutMetadata } from "./totem.types";
+import { computeScores, computeReveal } from "./junior.service";
 
 @Injectable()
 export class StripeWebhookService {
@@ -83,6 +84,7 @@ export class StripeWebhookService {
         country: session.customer_details?.address?.country ?? undefined,
       });
 
+      await this.computeJuniorRevealIfNeeded(order.id);
       await this.enqueueIfPending(order.id);
       return;
     }
@@ -98,6 +100,8 @@ export class StripeWebhookService {
       country: session.customer_details?.address?.country ?? undefined,
       customerName: metadata.prenom ?? session.customer_details?.name ?? undefined,
     });
+
+    await this.computeJuniorRevealIfNeeded(order.id);
 
     await this.mirror.markPaid({
       order,
@@ -129,6 +133,8 @@ export class StripeWebhookService {
         customerName: intent.metadata.prenom,
       });
 
+      await this.computeJuniorRevealIfNeeded(order.id);
+
       await this.mirror.markPaid({
         order,
         externalCommandId: intent.metadata.externalCommandId ?? intent.metadata.commande_id,
@@ -156,6 +162,8 @@ export class StripeWebhookService {
       currency: intent.currency ?? undefined,
       customerName: metadata.prenom,
     });
+
+    await this.computeJuniorRevealIfNeeded(order.id);
 
     await this.mirror.markPaid({
       order,
@@ -349,7 +357,7 @@ export class StripeWebhookService {
     const order = await this.prisma.totemOrder.findUniqueOrThrow({ where: { id: orderId } });
 
     if (order.status !== TotemOrderStatus.pending || order.queuedAt) return;
-    if (!hasEnoughAnswersForGeneration(order.answers)) return;
+    if (!hasEnoughAnswersForGeneration(order.answers, order.offer)) return;
 
     await this.queue.enqueue(order.id);
 
@@ -358,14 +366,52 @@ export class StripeWebhookService {
       data: { queuedAt: new Date() },
     });
   }
+
+  private async computeJuniorRevealIfNeeded(orderId: string): Promise<void> {
+    const order = await this.prisma.totemOrder.findUnique({ where: { id: orderId } });
+    if (!order || order.offer !== "junior") return;
+    if (order.juniorPayload) return;
+
+    const answers = order.answers as Record<string, { choice: string }> | null;
+    if (!answers) return;
+
+    try {
+      const scores = computeScores(answers);
+      const reveal = computeReveal(scores);
+      await this.prisma.totemOrder.update({
+        where: { id: orderId },
+        data: {
+          juniorPayload: {
+            scores,
+            dominant: reveal.dominant,
+            secondary: reveal.secondary,
+            totemName: reveal.name,
+            quality: reveal.quality,
+            orderNumber: reveal.orderNumber,
+            phrase: reveal.phrase,
+            share: reveal.share,
+          },
+        },
+      });
+    } catch {
+      // Non bloquant — le reveal sera calculé plus tard
+    }
+  }
 }
 
-export function hasEnoughAnswersForGeneration(value: Prisma.JsonValue): boolean {
-  if (!Array.isArray(value)) return false;
-  const answers = value.filter(
-    (answer) => isRecord(answer) && typeof answer.answer === "string" && answer.answer.trim(),
-  );
-  return answers.length >= 10;
+export function hasEnoughAnswersForGeneration(value: Prisma.JsonValue, offer?: string): boolean {
+  const minAnswers = offer === "junior" ? 5 : 10;
+  if (Array.isArray(value)) {
+    const answers = value.filter(
+      (answer) => isRecord(answer) && typeof answer.answer === "string" && answer.answer.trim(),
+    );
+    return answers.length >= minAnswers;
+  }
+  if (isRecord(value)) {
+    const keys = Object.keys(value);
+    return keys.length >= minAnswers;
+  }
+  return false;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -3,7 +3,7 @@ export type QuestionnaireAnswer = {
   answer: string;
 };
 
-export type TotemOffer = "origine" | "ancestral" | "famille";
+export type TotemOffer = "origine" | "ancestral" | "famille" | "junior";
 
 export type TotemStoryPage = {
   page: number;

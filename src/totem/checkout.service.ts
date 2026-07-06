@@ -8,7 +8,7 @@ import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemOffer } from "./totem.types";
 
 const checkoutInputSchema = z.object({
-  offer: z.enum(["origine", "ancestral", "famille"]),
+  offer: z.enum(["origine", "ancestral", "famille", "junior"]),
   externalCommandId: z.string().min(1).max(120).optional(),
   answers: z
     .array(
@@ -31,6 +31,7 @@ const OFFER_LABELS: Record<TotemOffer, string> = {
   origine: "TOTEM ANCESTRAL - Origine",
   ancestral: "TOTEM ANCESTRAL - Ancestral",
   famille: "TOTEM ANCESTRAL - Famille",
+  junior: "TOTEM JUNIOR",
 };
 
 @Injectable()
@@ -53,6 +54,7 @@ export class CheckoutService {
       origine: config.getOrThrow<number>("TOTEM_PRICE_ORIGINE_CENTS"),
       ancestral: config.getOrThrow<number>("TOTEM_PRICE_ANCESTRAL_CENTS"),
       famille: config.getOrThrow<number>("TOTEM_PRICE_FAMILLE_CENTS"),
+      junior: config.getOrThrow<number>("TOTEM_PRICE_JUNIOR_CENTS"),
     };
   }
 
