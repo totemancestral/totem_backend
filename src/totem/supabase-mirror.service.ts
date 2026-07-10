@@ -148,6 +148,12 @@ export class SupabaseMirrorService {
     if (error) throw new Error(`supabase_command_delivered_failed:${error.message}`);
   }
 
+  async markRetrying(commandId: string): Promise<void> {
+    await this.supabase.from("commandes").update({ statut: "en_generation" }).eq("id", commandId);
+    await this.supabase.from("oeuvres").update({ statut: "en_generation" }).eq("commande_id", commandId);
+    await this.supabase.from("erreurs_pipeline").delete().eq("commande_id", commandId);
+  }
+
   async markFailed(order: TotemOrder | null, message: string): Promise<void> {
     if (!order) return;
     const commandId = await this.findCommandId(order);
@@ -159,6 +165,27 @@ export class SupabaseMirrorService {
       etape: "pipeline",
       message,
     });
+  }
+
+  async readCommandByExternalId(
+    externalCommandId: string,
+  ): Promise<{ id: string; checkoutSessionId: string; status: string } | null> {
+    if (!isUuid(externalCommandId)) return null;
+
+    const { data, error } = await this.supabase
+      .from("commandes")
+      .select("id, stripe_session_id, statut")
+      .eq("id", externalCommandId)
+      .maybeSingle();
+
+    if (error) throw new Error(`supabase_command_lookup_failed:${error.message}`);
+    if (!data?.id) return null;
+
+    return {
+      id: data.id as string,
+      checkoutSessionId: data.stripe_session_id as string,
+      status: data.statut as string,
+    };
   }
 
   async readPaidCommand(input: {

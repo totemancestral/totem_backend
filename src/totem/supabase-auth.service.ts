@@ -1,15 +1,26 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
 
 @Injectable()
 export class SupabaseAuthService {
   private readonly supabase: SupabaseClient;
+  private readonly serviceSupabase: SupabaseClient;
 
   constructor(config: ConfigService) {
     this.supabase = createClient(
       config.getOrThrow<string>('SUPABASE_URL'),
       config.getOrThrow<string>('SUPABASE_ANON_KEY'),
+      {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+        },
+      },
+    );
+    this.serviceSupabase = createClient(
+      config.getOrThrow<string>('SUPABASE_URL'),
+      config.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY'),
       {
         auth: {
           persistSession: false,
@@ -28,6 +39,27 @@ export class SupabaseAuthService {
     }
 
     return data.user;
+  }
+
+  async requireAdmin(authorization?: string): Promise<User> {
+    const user = await this.requireUser(authorization);
+
+    const { data: role, error } = await this.serviceSupabase
+      .from('user_roles')
+      .select('id')
+      .eq('user_id', user.id)
+      .eq('role', 'admin')
+      .maybeSingle();
+
+    if (error) {
+      throw new ForbiddenException('admin_role_check_failed');
+    }
+
+    if (!role) {
+      throw new ForbiddenException('admin_access_required');
+    }
+
+    return user;
   }
 }
 

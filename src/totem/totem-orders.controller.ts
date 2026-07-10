@@ -14,4 +14,10 @@ export class TotemOrdersController {
     const user = await this.auth.requireUser(authorization);
     return this.orders.completeAfterPayment({ body, userId: user.id });
   }
+
+  @Post("retry")
+  async retry(@Body() body: unknown, @Headers("authorization") authorization?: string) {
+    await this.auth.requireAdmin(authorization);
+    return this.orders.retry(body);
+  }
 }
