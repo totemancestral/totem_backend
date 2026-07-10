@@ -1,23 +1,52 @@
 import { Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createClient, SupabaseClient, User } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+interface SupabaseUser {
+  id: string;
+  email?: string;
+}
+
+async function fetchUser(url: string, anonKey: string, token: string): Promise<SupabaseUser> {
+  const res = await fetch(`${url}/auth/v1/user`, {
+    method: 'GET',
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (!res.ok) {
+    throw new UnauthorizedException('supabase_token_invalid');
+  }
+
+  const body = await res.json();
+  if (!body?.id) {
+    throw new UnauthorizedException('supabase_token_invalid');
+  }
+
+  return { id: body.id as string, email: body.email as string | undefined };
+}
+
+function readBearerToken(authorization?: string): string {
+  const [scheme, token] = authorization?.split(' ') ?? [];
+
+  if (scheme?.toLowerCase() !== 'bearer' || !token) {
+    throw new UnauthorizedException('bearer_token_missing');
+  }
+
+  return token;
+}
 
 @Injectable()
 export class SupabaseAuthService {
-  private readonly supabase: SupabaseClient;
+  private readonly supabaseUrl: string;
+  private readonly supabaseAnonKey: string;
   private readonly serviceSupabase: SupabaseClient;
 
   constructor(config: ConfigService) {
-    this.supabase = createClient(
-      config.getOrThrow<string>('SUPABASE_URL'),
-      config.getOrThrow<string>('SUPABASE_ANON_KEY'),
-      {
-        auth: {
-          persistSession: false,
-          autoRefreshToken: false,
-        },
-      },
-    );
+    this.supabaseUrl = config.getOrThrow<string>('SUPABASE_URL');
+    this.supabaseAnonKey = config.getOrThrow<string>('SUPABASE_ANON_KEY');
     this.serviceSupabase = createClient(
       config.getOrThrow<string>('SUPABASE_URL'),
       config.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY'),
@@ -30,18 +59,12 @@ export class SupabaseAuthService {
     );
   }
 
-  async requireUser(authorization?: string): Promise<User> {
+  async requireUser(authorization?: string): Promise<SupabaseUser> {
     const token = readBearerToken(authorization);
-    const { data, error } = await this.supabase.auth.getUser(token);
-
-    if (error || !data.user) {
-      throw new UnauthorizedException('supabase_token_invalid');
-    }
-
-    return data.user;
+    return fetchUser(this.supabaseUrl, this.supabaseAnonKey, token);
   }
 
-  async requireAdmin(authorization?: string): Promise<User> {
+  async requireAdmin(authorization?: string): Promise<SupabaseUser> {
     const user = await this.requireUser(authorization);
 
     const { data: role, error } = await this.serviceSupabase
@@ -61,14 +84,4 @@ export class SupabaseAuthService {
 
     return user;
   }
-}
-
-function readBearerToken(authorization?: string): string {
-  const [scheme, token] = authorization?.split(' ') ?? [];
-
-  if (scheme?.toLowerCase() !== 'bearer' || !token) {
-    throw new UnauthorizedException('bearer_token_missing');
-  }
-
-  return token;
 }
