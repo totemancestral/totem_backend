@@ -61,7 +61,27 @@ export class SupabaseAuthService {
 
   async requireUser(authorization?: string): Promise<SupabaseUser> {
     const token = readBearerToken(authorization);
-    return fetchUser(this.supabaseUrl, this.supabaseAnonKey, token);
+    try {
+      try {
+        const ctrl = new AbortController();
+        setTimeout(() => ctrl.abort(), 5000);
+        const ping = await fetch('https://mjiealkqjcqvlfrxdcif.supabase.co/rest/v1/', {
+          method: 'HEAD',
+          headers: { apikey: this.supabaseAnonKey },
+          signal: ctrl.signal,
+        });
+        console.error(`[SupabaseAuthService] ping status: ${ping.status}`);
+      } catch (pingErr) {
+        console.error(`[SupabaseAuthService] ping FAILED: ${pingErr instanceof Error ? pingErr.message : String(pingErr)}`);
+      }
+
+      return await fetchUser(this.supabaseUrl, this.supabaseAnonKey, token);
+    } catch (e) {
+      const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      const stack = e instanceof Error ? e.stack || '' : '';
+      console.error(`[SupabaseAuthService] requireUser error: ${msg}\n${stack}`);
+      throw new UnauthorizedException(`auth_failed:${msg.slice(0, 120)}`);
+    }
   }
 
   async requireAdmin(authorization?: string): Promise<SupabaseUser> {
