@@ -88,7 +88,7 @@ TOTEM_IMAGE_GENERATION_CONCURRENCY=2
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=claude-opus-4-5
+ANTHROPIC_MODEL=claude-opus-4-6
 OPENAI_API_KEY=
 OPENAI_IMAGE_MODEL=gpt-image-2
 OPENAI_TTS_MODEL=gpt-4o-mini-tts
@@ -130,7 +130,7 @@ Le pipeline est lance par un job BullMQ dans `TotemWorker`.
 7. Generer un audio long a partir du prologue et des pages.
 8. Generer le PDF parchemin: couverture avec la premiere image, page de recit avec la seconde image, puis texte long continu sur autant de pages que necessaire.
 9. Uploader image, audio et PDF dans Supabase Storage.
-10. Mettre a jour `TotemOrder`, miroir `oeuvres`/`oeuvRESEND_API_KEY_VALUE`, puis envoyer l'email.
+10. Mettre a jour `TotemOrder`, miroir `oeuvres`/`oeuvre_versions`, puis envoyer l'email.
 
 ## Style visuel des images
 
@@ -159,7 +159,7 @@ Prisma gere deux tables backend principales:
 - `TotemOrder`: commande payee et etat du pipeline.
 - `TotemPipelineError`: erreurs historisees par commande.
 
-Le frontend lit principalement les tables Supabase applicatives (`commandes`, `oeuvres`, `oeuvRESEND_API_KEY_VALUE`). Le service `SupabaseMirrorService` synchronise les donnees backend vers ces tables.
+Le frontend lit principalement les tables Supabase applicatives (`commandes`, `oeuvres`, `oeuvre_versions`). Le service `SupabaseMirrorService` synchronise les donnees backend vers ces tables.
 
 ## Stockage
 

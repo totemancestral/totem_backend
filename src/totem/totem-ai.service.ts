@@ -318,7 +318,7 @@ Contraintes :
 - Si ${storyPageCount} > 5, les pages supplementaires prolongent le meme recit sans changer d'archetype.
 - Chaque storyPages[i].imagePrompt : meme totem sous forme de portrait ancestral coupe en deux, moitie gauche visage realiste de l'animal totem, moitie droite masque Ngil Fang stylise, sans typographie ni mot visible.
 - audioMessage : 130 a 160 mots, phrases courtes, pauses avec "..." ou retours ligne, ton pose, grave et doux.
-- imagePrompt : doit respecter ce format visuel : Portrait ancestral puissant, visage coupe en deux : moitie gauche visage realiste de ${animalName}, moitie droite masque Ngil Fang traditionnel africain stylise avec yeux blancs et motifs geometriques, fusion harmonieuse au milieu du visage, peau avec cicatrices rituelles dorees, ambiance sombre mystique, eclairage dramatique cinematographique, style artistique premium africain, tres detaille, haute resolution, 8k --ar 3:4 --stylize 250 --v 6.
+- imagePrompt : prompt descriptif en langage naturel (pas de parametres --ar/--stylize/--v), format visuel : Portrait ancestral puissant, visage coupe en deux : moitie gauche visage realiste de ${animalName}, moitie droite masque Ngil Fang traditionnel africain stylise avec yeux blancs et motifs geometriques, fusion harmonieuse au milieu du visage, peau avec cicatrices rituelles dorees, ambiance sombre mystique, eclairage dramatique cinematographique, style artistique premium africain, tres detaille, haute resolution, cadrage vertical 3:4.
 - Interdits : texte visible dans l'image, logos, watermark, verite scientifique ou ethnique, divination, emojis.`;
 }
 
@@ -429,7 +429,7 @@ function buildNgilMaskTotemPrompt(prompt: string, archetypeId: string): string {
     `Mandatory visual style: Portrait ancestral puissant, visage coupe en deux : moitie gauche ${leftFace}, moitie droite masque Ngil Fang traditionnel africain stylise avec yeux blancs et motifs geometriques.`,
     "Fusion harmonieuse au milieu du visage, peau avec cicatrices rituelles dorees, ambiance sombre mystique, eclairage dramatique cinematographique, style artistique premium africain, tres detaille, haute resolution, 8k.",
     "Composition verticale 3:4, centered close-up portrait, deep black #0D0D1A, ancestral gold #C9A84C, ochre, indigo, ivory, premium museum artwork.",
-    "Do not generate text, letters, logos, watermark, labels, UI, modern objects or cartoon style. --ar 3:4 --stylize 250 --v 6",
+    "Do not generate text, letters, logos, watermark, labels, UI, modern objects or cartoon style.",
   ]
     .filter(Boolean)
     .join("\n");
