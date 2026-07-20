@@ -517,14 +517,14 @@ MISSION :
 1. A1 : valider l'archetype impose par les scores FETA et le nom ancestral compose.
 2. A2 : composer le Parchemin Ancestral en ${context.language}, 1500-1800 caracteres espaces compris, 5 mouvements separes par doubles sauts de ligne. Variante narrative : ${context.narrativeVariant}. Le nom "${context.nomComplet}" doit apparaitre au moins une fois.
 3. A3 : composer le script audio de 130-160 mots, phrases courtes, pauses avec "..." ou retours a la ligne.
-4. A4 : produire un prompt image Midjourney v6 en anglais, 80-120 mots, selon ce prompt de base : ${context.imagePrompt}
+4. A4 : produire un prompt image en anglais pour le generateur d'images (OpenAI gpt-image), 80-120 mots, purement descriptif, SANS parametres de type --ar/--stylize/--v/--seed, selon ce prompt de base : ${context.imagePrompt}
 5. A5 : produire les textes de partage LinkedIn/Instagram, WhatsApp et message Clan.
 
 REGLES STRICTES :
 - Ne jamais presenter l'oeuvre comme une verite ethnique ou scientifique.
 - Conditionnel doux pour l'ancetre : "il aurait vecu", jamais "tu es" pour l'ancetre.
 - Pas d'emojis, pas de texte marketing dans le parchemin, pas de cliches.
-- Image : portrait ancestral puissant, visage coupe en deux, moitie gauche visage realiste du totem, moitie droite masque Ngil Fang stylise, format --ar 3:4, --stylize 250, --v 6, --seed ${numericSeed(context.seed)}.
+- Image : portrait ancestral puissant, visage coupe en deux, moitie gauche visage realiste du totem, moitie droite masque Ngil Fang stylise, cadrage vertical 3:4, portrait rapproche centre, en langage naturel sans parametres techniques.
 
 REPONSE JSON STRICTE, sans Markdown ni texte avant/apres :
 {
@@ -556,7 +556,7 @@ REPONSE JSON STRICTE, sans Markdown ni texte avant/apres :
     "estimated_duration_seconds": 88
   },
   "a4": {
-    "midjourney_prompt": "${context.imagePrompt}",
+    "image_prompt": "${context.imagePrompt}",
     "personality_keywords": ["kw1", "kw2", "kw3"],
     "visual_elements": "Elements visuels uniques",
     "visual_frame_used": ${context.visualFrame}
@@ -582,7 +582,8 @@ export function normalizeAdultV3Response(
   const ancestralName = readString(a1.nom_complet) || context.nomComplet;
   const parchmentText = readString(a2.parchment_text) || buildFallbackParchment(context);
   const audioMessage = readString(a3.audio_script) || buildAudioFallback(context, parchmentText);
-  const imagePrompt = readString(a4.midjourney_prompt) || context.imagePrompt;
+  const imagePrompt =
+    readString(a4.image_prompt) || readString(a4.midjourney_prompt) || context.imagePrompt;
   const storyPages = buildStoryPagesFromMovements(a2, parchmentText, imagePrompt);
 
   return {
@@ -697,7 +698,7 @@ function buildV3ImagePrompt(context: Omit<AdultV3Context, "imagePrompt">): strin
     "tres detaille, haute resolution, 8k",
     keywords ? `personality keywords: ${keywords}` : "",
     `composition: ${frame}`,
-    `sans texte, sans logo, sans watermark --ar 3:4 --stylize 250 --v 6 --seed ${numericSeed(context.seed)}`,
+    "sans texte, sans logo, sans watermark, cadrage vertical 3:4",
   ]
     .filter(Boolean)
     .join(", ");
