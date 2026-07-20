@@ -23,7 +23,7 @@ export const envSchema = z.object({
   STRIPE_SECRET_KEY: optionalString,
   STRIPE_WEBHOOK_SECRET: optionalString,
   ANTHROPIC_API_KEY: z.string().min(1),
-  ANTHROPIC_MODEL: z.string().min(1).default("claude-opus-4-5"),
+  ANTHROPIC_MODEL: z.string().min(1).default("claude-opus-4-6"),
   OPENAI_API_KEY: z.string().min(1),
   OPENAI_IMAGE_MODEL: z.string().min(1).default("gpt-image-2"),
   OPENAI_TTS_MODEL: z.string().min(1).default("gpt-4o-mini-tts"),
