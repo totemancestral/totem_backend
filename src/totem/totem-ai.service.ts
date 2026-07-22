@@ -676,7 +676,18 @@ function drawStoryFlow(
   let pageNumber = 1;
   let cursor = createStoryContentPage(doc, input, pageNumber, true);
 
+  // Le parchemin livré ne doit jamais dépasser 3 pages (page de garde incluse).
+  const MAX_PARCHMENT_PAGES = 3;
+  let stopped = false;
+  const tryNewPage = (): boolean => {
+    if (doc.getPageCount() >= MAX_PARCHMENT_PAGES) return false;
+    pageNumber += 1;
+    cursor = createStoryContentPage(doc, input, pageNumber, true);
+    return true;
+  };
+
   for (const section of sections) {
+    if (stopped) break;
     const titleSize = 10;
     const titleLines = wrapPdfText(
       section.title.toUpperCase(),
@@ -685,9 +696,9 @@ function drawStoryFlow(
       cursor.maxWidth - 24,
     );
     const neededTitleHeight = titleLines.length * 13 + 8;
-    if (cursor.y - neededTitleHeight < cursor.bottomY) {
-      pageNumber += 1;
-      cursor = createStoryContentPage(doc, input, pageNumber, true);
+    if (cursor.y - neededTitleHeight < cursor.bottomY && !tryNewPage()) {
+      stopped = true;
+      break;
     }
 
     for (const titleLine of titleLines) {
@@ -711,6 +722,7 @@ function drawStoryFlow(
       .filter(Boolean);
 
     for (const paragraph of paragraphs) {
+      if (stopped) break;
       const paragraphFont =
         input.manuscriptFont ?? (section.index % 2 === 0 ? input.italicFont : input.bodyFont);
       const paragraphSize = input.manuscriptFont ? 12.2 : 9.4;
@@ -724,9 +736,9 @@ function drawStoryFlow(
       );
 
       for (const line of lines) {
-        if (cursor.y - paragraphLineHeight < cursor.bottomY) {
-          pageNumber += 1;
-          cursor = createStoryContentPage(doc, input, pageNumber, true);
+        if (cursor.y - paragraphLineHeight < cursor.bottomY && !tryNewPage()) {
+          stopped = true;
+          break;
         }
 
         cursor.page.drawText(line, {
@@ -745,9 +757,15 @@ function drawStoryFlow(
     cursor.y -= 8;
   }
 
+  // Sceau final : nouvelle page uniquement si le plafond n'est pas atteint,
+  // sinon on remonte le curseur pour le poser en bas de la dernière page.
   if (cursor.y - 80 < cursor.bottomY) {
-    pageNumber += 1;
-    cursor = createStoryContentPage(doc, input, pageNumber, true);
+    if (doc.getPageCount() < MAX_PARCHMENT_PAGES) {
+      pageNumber += 1;
+      cursor = createStoryContentPage(doc, input, pageNumber, true);
+    } else {
+      cursor.y = cursor.bottomY + 80;
+    }
   }
 
   drawCentered(cursor.page, input.titleFont, "INSIGNE", 15, cursor.y, input.width, pdfColor("ink"));
