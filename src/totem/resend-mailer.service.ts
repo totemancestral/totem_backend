@@ -12,6 +12,8 @@ type DeliveryPayload = {
 
 type DeliveryCopy = {
   subject: string;
+  title: string;
+  nameLabel: string;
   ready: string;
   linksIntro: string;
   image: string;
@@ -184,11 +186,13 @@ function readDeliveryCopy(locale: "fr" | "en"): DeliveryCopy {
   if (locale === "en") {
     return {
       subject: "Your TOTEM ANCESTRAL box is ready",
-      ready: "Your digital box is ready.",
+      title: "Your artwork is ready",
+      nameLabel: "Ancestral name",
+      ready: "Your digital box is composed and waiting for you.",
       linksIntro: "Your files are available here:",
       image: "Image",
       audio: "Audio",
-      pdf: "PDF",
+      pdf: "Parchment (PDF)",
       signedNotice: "These signed links remain valid for 30 days.",
       fallbackName: "Your totem",
     };
@@ -196,46 +200,68 @@ function readDeliveryCopy(locale: "fr" | "en"): DeliveryCopy {
 
   return {
     subject: "Votre coffret TOTEM ANCESTRAL est pret",
-    ready: "Votre coffret digital est pret.",
+    title: "Votre oeuvre est prete",
+    nameLabel: "Nom ancestral",
+    ready: "Votre coffret numerique est compose et vous attend.",
     linksIntro: "Vos fichiers sont disponibles ici :",
     image: "Image",
     audio: "Audio",
-    pdf: "PDF",
+    pdf: "Parchemin (PDF)",
     signedNotice: "Ces liens signes restent valides pendant 30 jours.",
     fallbackName: "Votre totem",
   };
 }
 
+/**
+ * Gabarit HTML de marque, compatible clients mail (tables + styles inline).
+ * Palette TOTEM : nuit profonde + or ancestral.
+ */
+function wrapEmail(title: string, inner: string): string {
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0c0e16;padding:32px 16px;font-family:Arial,Helvetica,sans-serif">
+  <tr><td align="center">
+    <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#12131b;border:1px solid rgba(216,173,77,.28);border-radius:14px">
+      <tr><td style="padding:30px 32px 0">
+        <p style="letter-spacing:.24em;text-transform:uppercase;color:#d8ad4d;font-size:12px;margin:0 0 6px">TOTEM ANCESTRAL</p>
+        <div style="height:1px;background:linear-gradient(90deg,rgba(216,173,77,.6),transparent);margin:10px 0 22px"></div>
+        <h1 style="font-size:26px;line-height:1.15;margin:0 0 16px;color:#fff;font-family:Georgia,serif">${title}</h1>
+      </td></tr>
+      <tr><td style="padding:0 32px;color:#e2e1ee;font-size:15px;line-height:1.65">${inner}</td></tr>
+      <tr><td style="padding:28px 32px 30px">
+        <div style="height:1px;background:rgba(216,173,77,.18);margin:20px 0 16px"></div>
+        <p style="margin:0;color:#8a8677;font-size:12px">SENYCE PARTNERS &mdash; Totem Ancestral &middot; <a href="mailto:contact@totem-ancestral.com" style="color:#8a8677">contact@totem-ancestral.com</a></p>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>`;
+}
+
+function fileLink(url: string, label: string): string {
+  return `<a href="${escapeAttribute(url)}" style="display:inline-block;margin:0 14px 8px 0;color:#f6c865;text-decoration:none;font-size:13px;border-bottom:1px solid rgba(246,200,101,.35);padding-bottom:2px">${label} &rarr;</a>`;
+}
+
 function renderFallbackDelivery(payload: DeliveryPayload, copy: DeliveryCopy): RenderedEmail {
   const name = escapeHtml(payload.order.ancestralName ?? copy.fallbackName);
+  const inner = `
+        <p style="margin:0 0 16px">${copy.ready}</p>
+        <p style="margin:0 0 4px;color:#8a8677;font-size:13px;text-transform:uppercase;letter-spacing:.12em">${copy.nameLabel}</p>
+        <p style="margin:0 0 22px;color:#f6c865;font-size:20px;font-family:Georgia,serif">${name}</p>
+        <p style="margin:0 0 10px">${copy.linksIntro}</p>
+        <p style="margin:0 0 18px">${fileLink(payload.imageUrl, copy.image)}${fileLink(payload.audioUrl, copy.audio)}${fileLink(payload.pdfUrl, copy.pdf)}</p>
+        <p style="margin:0;color:#8a8677;font-size:13px">${copy.signedNotice}</p>`;
 
   return {
     subject: copy.subject,
-    html: `
-    <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #171717;">
-      <h1>TOTEM ANCESTRAL</h1>
-      <p>${copy.ready}</p>
-      <p><strong>${name}</strong></p>
-      <p>${copy.linksIntro}</p>
-      <ul>
-        <li><a href="${escapeAttribute(payload.imageUrl)}">${copy.image}</a></li>
-        <li><a href="${escapeAttribute(payload.audioUrl)}">${copy.audio}</a></li>
-        <li><a href="${escapeAttribute(payload.pdfUrl)}">${copy.pdf}</a></li>
-      </ul>
-      <p>${copy.signedNotice}</p>
-    </div>
-  `,
+    html: wrapEmail(copy.title, inner),
   };
 }
 
 function renderFailureEmail(orderId: string, error: string): string {
-  return `
-    <div style="font-family: Arial, sans-serif; line-height: 1.5; color: #171717;">
-      <h1>Erreur pipeline TOTEM</h1>
-      <p><strong>Commande:</strong> ${escapeHtml(orderId)}</p>
-      <pre style="white-space: pre-wrap;">${escapeHtml(error)}</pre>
-    </div>
-  `;
+  const inner = `
+        <p style="margin:0 0 12px">Une erreur est survenue durant la composition d'une commande.</p>
+        <p style="margin:0 0 6px;color:#8a8677;font-size:13px;text-transform:uppercase;letter-spacing:.12em">Commande</p>
+        <p style="margin:0 0 18px;color:#f6c865;font-size:15px;font-family:Georgia,serif">${escapeHtml(orderId)}</p>
+        <pre style="white-space:pre-wrap;background:#0c0e16;border:1px solid rgba(216,173,77,.18);border-radius:8px;padding:14px;color:#e2e1ee;font-size:13px;margin:0">${escapeHtml(error)}</pre>`;
+  return wrapEmail("Erreur pipeline", inner);
 }
 
 function escapeHtml(value: string): string {
