@@ -217,16 +217,24 @@ function readDeliveryCopy(locale: "fr" | "en"): DeliveryCopy {
  * Palette TOTEM : nuit profonde + or ancestral.
  */
 function wrapEmail(title: string, inner: string): string {
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0c0e16;padding:32px 16px;font-family:Arial,Helvetica,sans-serif">
+  const site = "https://totem-ancestral.com";
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0a0b12;padding:36px 16px;font-family:Arial,Helvetica,sans-serif">
   <tr><td align="center">
-    <table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;background:#12131b;border:1px solid rgba(216,173,77,.28);border-radius:14px">
-      <tr><td style="padding:30px 32px 0">
-        <p style="letter-spacing:.24em;text-transform:uppercase;color:#d8ad4d;font-size:12px;margin:0 0 6px">TOTEM ANCESTRAL</p>
-        <div style="height:1px;background:linear-gradient(90deg,rgba(216,173,77,.6),transparent);margin:10px 0 22px"></div>
-        <h1 style="font-size:26px;line-height:1.15;margin:0 0 16px;color:#fff;font-family:Georgia,serif">${title}</h1>
+    <table role="presentation" width="580" cellpadding="0" cellspacing="0" style="max-width:580px;width:100%;background:#16121b;background:linear-gradient(160deg,#1a1c27 0%,#131420 55%,#0e0f17 100%);border:1px solid rgba(216,173,77,.34);border-radius:22px;overflow:hidden;box-shadow:0 24px 60px -30px rgba(216,173,77,.4)">
+      <tr><td style="height:3px;line-height:3px;font-size:0;background:linear-gradient(90deg,transparent,rgba(216,173,77,.85),transparent)">&nbsp;</td></tr>
+      <tr><td style="padding:30px 36px 0">
+        <table role="presentation" cellpadding="0" cellspacing="0"><tr>
+          <td valign="middle"><img src="${site}/assets/totem-logo.png" width="42" height="42" alt="" style="display:block;border:0;outline:none"></td>
+          <td valign="middle" style="padding-left:13px">
+            <div style="letter-spacing:.26em;text-transform:uppercase;color:#d8ad4d;font-size:13px;font-weight:700">TOTEM ANCESTRAL</div>
+            <div style="letter-spacing:.14em;text-transform:uppercase;color:#8a8677;font-size:10px;margin-top:3px">SENYCE PARTNERS</div>
+          </td>
+        </tr></table>
+        <div style="height:1px;background:linear-gradient(90deg,rgba(216,173,77,.6),transparent);margin:22px 0 22px"></div>
+        <h1 style="font-size:27px;line-height:1.18;margin:0 0 16px;color:#fff;font-family:Georgia,serif">${title}</h1>
       </td></tr>
-      <tr><td style="padding:0 32px;color:#e2e1ee;font-size:15px;line-height:1.65">${inner}</td></tr>
-      <tr><td style="padding:28px 32px 30px">
+      <tr><td style="padding:0 36px 6px;color:#e2e1ee;font-size:15px;line-height:1.66">${inner}</td></tr>
+      <tr><td style="padding:26px 36px 32px">
         <div style="height:1px;background:rgba(216,173,77,.18);margin:20px 0 16px"></div>
         <p style="margin:0;color:#8a8677;font-size:12px">SENYCE PARTNERS &mdash; Totem Ancestral &middot; <a href="mailto:contact@totem-ancestral.com" style="color:#8a8677">contact@totem-ancestral.com</a></p>
       </td></tr>
