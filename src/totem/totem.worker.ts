@@ -110,12 +110,6 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
       });
       const image = await this.storage.store(order.id, "image", imageArtefact);
 
-      const storyImages = await this.generation.generateStoryImages({
-        orderId: order.id,
-        archetypeId: text.archetypeId,
-        text,
-      });
-
       const [audio, pdf] = await Promise.all([
         this.generation
           .generateAudio({
@@ -134,7 +128,6 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
             text,
             answers,
             image: imageArtefact,
-            storyImages,
           })
           .then((artefact) => this.storage.store(order.id, "pdf", artefact)),
       ]);

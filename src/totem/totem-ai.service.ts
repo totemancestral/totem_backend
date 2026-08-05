@@ -58,13 +58,6 @@ type PdfRequest = {
   text: TotemTextPayload;
   answers: QuestionnaireAnswer[];
   image?: GeneratedArtefact;
-  storyImages?: GeneratedArtefact[];
-};
-
-type StoryImagesRequest = {
-  orderId: string;
-  archetypeId: string;
-  text: TotemTextPayload;
 };
 
 const anthropicResponseSchema = z.object({
@@ -159,18 +152,6 @@ export class TotemAiService {
 
   buildAudioNarration(text: TotemTextPayload): string {
     return buildAudioNarration(text, this.storyPageCount);
-  }
-
-  async generateStoryImages(payload: StoryImagesRequest): Promise<GeneratedArtefact[]> {
-    const storyPages = this.buildStoryPages(payload.text);
-
-    const storyImage = await this.generateImage({
-      orderId: payload.orderId,
-      archetypeId: payload.archetypeId,
-      prompt: buildPrimaryStoryImagePrompt(payload.text, storyPages),
-    });
-
-    return [storyImage];
   }
 
   async generateImage(payload: ImageRequest): Promise<GeneratedArtefact> {
@@ -393,33 +374,7 @@ function buildAudioNarration(text: TotemTextPayload, minimumCount: number): stri
   return text.audioMessage.trim() || text.parchmentText.slice(0, 1400);
 }
 
-function buildPrimaryStoryImagePrompt(text: TotemTextPayload, pages: TotemStoryPage[]): string {
-  const excerpt = pages
-    .slice(0, 5)
-    .map((page) => `${page.title}: ${page.text}`)
-    .join("\n")
-    .slice(0, 1800);
 
-  return [
-    `Main story illustration for the long ancestral tale of ${text.ancestralName} (${text.archetypeId}).`,
-    "This is the second and only interior image of the delivered parchment: it must summarize the spiritual universe of the story without trying to show every chapter.",
-    excerpt,
-    buildNgilMaskTotemPrompt("", text.archetypeId),
-    "The same split-face totem must remain central and recognizable, carrying memory, protection and revelation.",
-    "No letters, no typography, no visible words, no watermark.",
-  ].join("\n");
-}
-
-function buildSceneImagePrompt(text: TotemTextPayload, page: TotemStoryPage): string {
-  return [
-    page.imagePrompt,
-    `Central totem: ${text.ancestralName} (${text.archetypeId}).`,
-    "The same split-face Ngil totem must be recognizable across every page, but the scene, environment, lighting and symbolic universe must match this page text.",
-    `Page text to illustrate: ${page.text.slice(0, 900)}`,
-    buildNgilMaskTotemPrompt("", text.archetypeId),
-    "No letters, no typography, no visible words, no watermark.",
-  ].join("\n");
-}
 
 function buildNgilMaskTotemPrompt(prompt: string, archetypeId: string): string {
   const leftFace = animalLeftFace(archetypeId);
@@ -641,7 +596,6 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
 
   const storyPageCount = Math.max(1, payload.text.storyPages.length || 20);
   const storyPages = ensureStoryPages(payload.text, storyPageCount);
-  const storyImage = await embedPdfImage(doc, payload.storyImages?.[0] ?? payload.image);
 
   drawStoryFlow(doc, {
     width,
@@ -652,7 +606,6 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
     manuscriptFont,
     text: payload.text,
     storyPages,
-    storyImage: storyImage ?? coverImage,
   });
 
   return doc.save();
@@ -669,12 +622,11 @@ function drawStoryFlow(
     manuscriptFont: PDFFont | null;
     text: TotemTextPayload;
     storyPages: TotemStoryPage[];
-    storyImage: PDFImage | null;
   },
 ): void {
   const sections = buildStorySections(input.text, input.storyPages);
   let pageNumber = 1;
-  let cursor = createStoryContentPage(doc, input, pageNumber, true);
+  let cursor = createStoryContentPage(doc, input, pageNumber);
 
   // Le parchemin livré ne doit jamais dépasser 3 pages (page de garde incluse).
   const MAX_PARCHMENT_PAGES = 3;
@@ -682,7 +634,7 @@ function drawStoryFlow(
   const tryNewPage = (): boolean => {
     if (doc.getPageCount() >= MAX_PARCHMENT_PAGES) return false;
     pageNumber += 1;
-    cursor = createStoryContentPage(doc, input, pageNumber, true);
+    cursor = createStoryContentPage(doc, input, pageNumber);
     return true;
   };
 
@@ -762,7 +714,7 @@ function drawStoryFlow(
   if (cursor.y - 80 < cursor.bottomY) {
     if (doc.getPageCount() < MAX_PARCHMENT_PAGES) {
       pageNumber += 1;
-      cursor = createStoryContentPage(doc, input, pageNumber, true);
+      cursor = createStoryContentPage(doc, input, pageNumber);
     } else {
       cursor.y = cursor.bottomY + 80;
     }
@@ -839,10 +791,8 @@ function createStoryContentPage(
     height: number;
     titleFont: PDFFont;
     bodyFont: PDFFont;
-    storyImage: PDFImage | null;
   },
   pageNumber: number,
-  withImage: boolean,
 ): { page: PDFPage; textX: number; y: number; bottomY: number; maxWidth: number } {
   const page = doc.addPage([input.width, input.height]);
   const box = drawRoyalParchment(page, input.width, input.height);
@@ -866,15 +816,9 @@ function createStoryContentPage(
     pdfColor("goldDark"),
   );
 
-  let y = input.height - 156;
-  if (withImage) {
-    const frameWidth = Math.min(286, box.width - 108);
-    const frameHeight = 188;
-    const frameX = input.width / 2 - frameWidth / 2;
-    const frameY = input.height - 344;
-    drawImageFrame(page, input.storyImage, frameX, frameY, frameWidth, frameHeight, pageNumber);
-    y = frameY - 30;
-  }
+  // Le totem n'est illustré qu'une seule fois, en page de garde : les pages de
+  // recit restent du texte manuscrit sur parchemin (cf. totem-parchemin/).
+  const y = input.height - 156;
 
   drawCentered(
     page,
@@ -895,39 +839,6 @@ function createStoryContentPage(
   };
 }
 
-function drawImageFrame(
-  page: PDFPage,
-  image: PDFImage | null,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  seed: number,
-): void {
-  page.drawRectangle({
-    x: x - 6,
-    y: y - 6,
-    width: width + 12,
-    height: height + 12,
-    color: pdfColor("goldDark"),
-    opacity: 0.38,
-  });
-  page.drawRectangle({
-    x: x - 2,
-    y: y - 2,
-    width: width + 4,
-    height: height + 4,
-    color: pdfColor("gold"),
-    opacity: 0.85,
-  });
-
-  if (image) {
-    drawImageInside(page, image, x, y, width, height);
-    return;
-  }
-
-  drawSymbolicScenePanel(page, x, y, width, height, seed);
-}
 
 function buildStorySections(
   text: TotemTextPayload,
@@ -968,137 +879,8 @@ function drawRoyalParchment(
   return { x, y: bodyY, width: scrollWidth, height: bodyH };
 }
 
-function drawStoryPage(
-  page: PDFPage,
-  fonts: { titleFont: PDFFont; bodyFont: PDFFont; italicFont: PDFFont },
-  storyPage: TotemStoryPage,
-  image: PDFImage | null,
-  pageNumber: number,
-  totalPages: number,
-  pageWidth: number,
-  pageHeight: number,
-  box: { x: number; y: number; width: number; height: number },
-): void {
-  drawCenteredFit(
-    page,
-    fonts.titleFont,
-    storyPage.title.toUpperCase(),
-    15,
-    pageHeight - 104,
-    pageWidth,
-    box.width - 110,
-    pdfColor("goldDark"),
-  );
-  drawCentered(
-    page,
-    fonts.bodyFont,
-    "--- * ---",
-    10,
-    pageHeight - 126,
-    pageWidth,
-    pdfColor("goldDark"),
-  );
 
-  const frameWidth = Math.min(286, box.width - 108);
-  const frameHeight = 188;
-  const frameX = pageWidth / 2 - frameWidth / 2;
-  const frameY = pageHeight - 344;
 
-  page.drawRectangle({
-    x: frameX - 6,
-    y: frameY - 6,
-    width: frameWidth + 12,
-    height: frameHeight + 12,
-    color: pdfColor("goldDark"),
-    opacity: 0.38,
-  });
-  page.drawRectangle({
-    x: frameX - 2,
-    y: frameY - 2,
-    width: frameWidth + 4,
-    height: frameHeight + 4,
-    color: pdfColor("gold"),
-    opacity: 0.85,
-  });
-
-  if (image) {
-    drawImageInside(page, image, frameX, frameY, frameWidth, frameHeight);
-  } else {
-    drawSymbolicScenePanel(page, frameX, frameY, frameWidth, frameHeight, pageNumber);
-  }
-
-  const textX = box.x + 48;
-  const textTop = frameY - 30;
-  const textBottom = box.y + 92;
-  drawFittedParagraph(
-    page,
-    pageNumber % 2 === 0 ? fonts.bodyFont : fonts.italicFont,
-    storyPage.text,
-    textX,
-    textTop,
-    textBottom,
-    box.width - 96,
-  );
-
-  drawCentered(
-    page,
-    fonts.bodyFont,
-    `Page ${pageNumber} / ${totalPages}`,
-    8,
-    box.y + 34,
-    pageWidth,
-    pdfColor("soft"),
-  );
-}
-
-function drawImageInside(
-  page: PDFPage,
-  image: PDFImage,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void {
-  const scaled = image.scaleToFit(width, height);
-  page.drawRectangle({ x, y, width, height, color: rgb(0.08, 0.035, 0.01), opacity: 0.96 });
-  page.drawImage(image, {
-    x: x + width / 2 - scaled.width / 2,
-    y: y + height / 2 - scaled.height / 2,
-    width: scaled.width,
-    height: scaled.height,
-  });
-}
-
-function drawSymbolicScenePanel(
-  page: PDFPage,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  seed: number,
-): void {
-  page.drawRectangle({ x, y, width, height, color: rgb(0.09, 0.04, 0.012) });
-  page.drawCircle({
-    x: x + width * 0.5,
-    y: y + height * 0.56,
-    size: height * 0.34,
-    color: rgb(0.7, 0.18, 0.07),
-    opacity: 0.42,
-  });
-  for (let i = 0; i < 7; i += 1) {
-    page.drawCircle({
-      x: x + 24 + pseudoRandom(seed * 31 + i) * (width - 48),
-      y: y + 24 + pseudoRandom(seed * 53 + i) * (height - 48),
-      size: 1.8 + pseudoRandom(seed * 71 + i) * 2.8,
-      color: pdfColor("gold"),
-      opacity: 0.52,
-    });
-  }
-  page.drawSvgPath(
-    `M ${x + width * 0.18} ${y + height * 0.24} C ${x + width * 0.28} ${y + height * 0.58}, ${x + width * 0.72} ${y + height * 0.58}, ${x + width * 0.82} ${y + height * 0.24}`,
-    { borderColor: pdfColor("gold"), borderWidth: 2.1, opacity: 0.68 },
-  );
-}
 
 function drawFittedParagraph(
   page: PDFPage,
