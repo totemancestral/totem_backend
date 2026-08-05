@@ -520,8 +520,10 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   const italicFont = await doc.embedFont(StandardFonts.TimesRomanItalic);
   const manuscriptFont = await loadManuscriptFont(doc);
 
+  const parchment = await loadParchmentBackground(doc);
+
   const firstPage = doc.addPage([width, height]);
-  const firstBox = drawRoyalParchment(firstPage, width, height);
+  const firstBox = drawRoyalParchment(firstPage, width, height, parchment);
   drawCentered(firstPage, titleFont, "TOTEM ANCESTRAL", 24, height - 102, width, pdfColor("ink"));
   drawCentered(
     firstPage,
@@ -606,6 +608,7 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
     manuscriptFont,
     text: payload.text,
     storyPages,
+    parchment,
   });
 
   return doc.save();
@@ -622,6 +625,7 @@ function drawStoryFlow(
     manuscriptFont: PDFFont | null;
     text: TotemTextPayload;
     storyPages: TotemStoryPage[];
+    parchment: PDFImage | null;
   },
 ): void {
   const sections = buildStorySections(input.text, input.storyPages);
@@ -791,11 +795,12 @@ function createStoryContentPage(
     height: number;
     titleFont: PDFFont;
     bodyFont: PDFFont;
+    parchment: PDFImage | null;
   },
   pageNumber: number,
 ): { page: PDFPage; textX: number; y: number; bottomY: number; maxWidth: number } {
   const page = doc.addPage([input.width, input.height]);
-  const box = drawRoyalParchment(page, input.width, input.height);
+  const box = drawRoyalParchment(page, input.width, input.height, input.parchment);
 
   drawCentered(
     page,
@@ -854,13 +859,34 @@ function buildStorySections(
   ].filter((section) => section.text.trim().length > 0);
 }
 
+/**
+ * Charge le parchemin (rouleau ouvert avec ses tringles) servant de fond aux
+ * pages. Même stratégie de chemins que la police manuscrite ; en cas d'absence
+ * de l'asset, le rendu retombe sur le parchemin vectoriel.
+ */
+async function loadParchmentBackground(doc: PDFDocument): Promise<PDFImage | null> {
+  const localPaths = [
+    join(process.cwd(), "assets/parchemin_ouvert.png"),
+    join(process.cwd(), "dist/assets/parchemin_ouvert.png"),
+  ];
+
+  for (const localPath of localPaths) {
+    try {
+      return await doc.embedPng(await readFile(localPath));
+    } catch {
+      // Layout de déploiement suivant.
+    }
+  }
+
+  return null;
+}
+
 function drawRoyalParchment(
   page: PDFPage,
   width: number,
   height: number,
+  background: PDFImage | null,
 ): { x: number; y: number; width: number; height: number } {
-  drawScene(page, width, height);
-
   const scrollWidth = Math.min(470, width - 82);
   const x = width / 2 - scrollWidth / 2;
   const topRodY = height - 82;
@@ -870,6 +896,15 @@ function drawRoyalParchment(
   const bodyY = bottomRodY + rodHeight + curlHeight;
   const bodyH = topRodY - bodyY - curlHeight;
 
+  // Le parchemin réel occupe toute la page ; la zone d'écriture reste celle du
+  // rouleau vectoriel pour conserver la mise en page (texte posé sur le papier,
+  // jamais sur les tringles).
+  if (background) {
+    page.drawImage(background, { x: 0, y: 0, width, height });
+    return { x, y: bodyY, width: scrollWidth, height: bodyH };
+  }
+
+  drawScene(page, width, height);
   drawRod(page, x, topRodY, scrollWidth, rodHeight);
   drawRod(page, x, bottomRodY, scrollWidth, rodHeight);
   drawCurl(page, x, topRodY - curlHeight, scrollWidth, curlHeight, "top");
