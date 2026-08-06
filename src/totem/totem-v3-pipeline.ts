@@ -518,6 +518,7 @@ MISSION :
 2. A2 : composer le Parchemin Ancestral en ${context.language}, 1500-1800 caracteres espaces compris, 5 mouvements separes par doubles sauts de ligne. Variante narrative : ${context.narrativeVariant}. Le nom "${context.nomComplet}" doit apparaitre au moins une fois.
 3. A3 : composer le script audio de 130-160 mots, phrases courtes, pauses avec "..." ou retours a la ligne.
 4. A4 : produire un prompt image en anglais pour le generateur d'images (OpenAI gpt-image), 80-120 mots, purement descriptif, SANS parametres de type --ar/--stylize/--v/--seed, selon ce prompt de base : ${context.imagePrompt}
+   L'image doit passer pour une VRAIE PHOTOGRAPHIE de studio, jamais pour une image generee. Ecris donc en vocabulaire photographique (appareil, optique, lumiere, matiere, texture de peau). N'emploie JAMAIS les termes "8k", "4k", "ultra detailed", "hyperrealistic", "photorealistic", "highly detailed", "masterpiece", "trending on artstation", "digital art", "render", "CGI", "concept art", "cinematic" : ils tirent le rendu vers le synthetique et le lisse. Privilegie les imperfections reelles (pores, grain, asymetrie legere, usure du bois du masque).
 5. A5 : produire les textes de partage LinkedIn/Instagram, WhatsApp et message Clan.
 
 REGLES STRICTES :
@@ -686,19 +687,21 @@ function buildV3ImagePrompt(context: Omit<AdultV3Context, "imagePrompt">): strin
   const keywords = personalityKeywords(context.answers).join(", ");
   const leftFace = animalLeftFace(context.archetype.id);
 
+  // Direction photographique : on cherche une vraie photographie de studio,
+  // pas un rendu 3D. Aucun terme du registre « IA » (8k, hyperdetaille,
+  // artstation...) qui tire l'image vers le lisse et le synthetique.
   return [
-    "Portrait ancestral puissant, visage coupe en deux",
+    "Photographie de portrait documentaire, une seule personne, visage coupe en deux",
     `moitie gauche ${leftFace}`,
-    "moitie droite masque Ngil Fang traditionnel africain stylise avec yeux blancs et motifs geometriques",
-    "fusion harmonieuse au milieu du visage",
-    "peau avec cicatrices rituelles dorees",
-    "ambiance sombre mystique",
-    "eclairage dramatique cinematographique",
-    "style artistique premium africain",
-    "tres detaille, haute resolution, 8k",
-    keywords ? `personality keywords: ${keywords}` : "",
+    "moitie droite un veritable masque Ngil Fang en bois sculpte, pigment kaolin blanc use, patine et traces d'outil visibles",
+    "transition organique au milieu du visage, sans contour net ni effet de collage",
+    "cicatrices rituelles dorees discretes, en relief sur la peau",
+    "peau reelle : pores visibles, grain, legere asymetrie, imperfections naturelles, aucune retouche",
+    "lumiere naturelle unique et laterale, ombres douces, contraste profond mais non sature",
+    "prise de vue moyen format, objectif 85mm, f/2.8, faible profondeur de champ, grain argentique fin",
+    keywords ? `traits de caractere a rendre par la posture et le regard : ${keywords}` : "",
     `composition: ${frame}`,
-    "sans texte, sans logo, sans watermark, cadrage vertical 3:4",
+    "cadrage vertical 3:4, sans texte, sans logo, sans watermark",
   ]
     .filter(Boolean)
     .join(", ");

@@ -379,11 +379,19 @@ function buildAudioNarration(text: TotemTextPayload, minimumCount: number): stri
 function buildNgilMaskTotemPrompt(prompt: string, archetypeId: string): string {
   const leftFace = animalLeftFace(archetypeId);
 
+  // Le rendu doit passer pour une photographie prise en studio, pas pour une
+  // image generee : d'ou une direction strictement photographique (appareil,
+  // optique, lumiere, matiere de peau) et un negatif qui exclut explicitement
+  // les signatures du rendu synthetique.
   return [
     prompt,
-    `Mandatory visual style: Portrait ancestral puissant, visage coupe en deux : moitie gauche ${leftFace}, moitie droite masque Ngil Fang traditionnel africain stylise avec yeux blancs et motifs geometriques.`,
-    "Fusion harmonieuse au milieu du visage, peau avec cicatrices rituelles dorees, ambiance sombre mystique, eclairage dramatique cinematographique, style artistique premium africain, tres detaille, haute resolution, 8k.",
-    "Composition verticale 3:4, centered close-up portrait, deep black #0D0D1A, ancestral gold #C9A84C, ochre, indigo, ivory, premium museum artwork.",
+    `Mandatory subject: a real photographic portrait of one person, face split in two — left half ${leftFace}, right half an authentic hand-carved Fang Ngil wooden mask with aged white kaolin pigment, visible tool marks, worn patina and real wood grain.`,
+    "Organic transition down the middle of the face: skin meets wood with no hard seam, no cut-out or collage effect.",
+    "Real skin: visible pores, fine hair, natural texture and slight asymmetry, subtle blemishes, no retouching, no smoothing.",
+    "Lighting: one natural side light source with soft falloff, deep but unsaturated shadows, no rim glow, no lens flare, no artificial halo.",
+    "Camera: medium format, 85mm lens at f/2.8, shallow depth of field, natural colour depth, fine analog grain.",
+    "Palette: deep black #0D0D1A, ancestral gold #C9A84C, ochre, indigo, ivory. Vertical 3:4 close-up framing.",
+    "Avoid absolutely: 3D render, CGI, digital painting, illustration, concept art, airbrushed or waxy plastic skin, glossy highlights, oversaturation, HDR halo, perfect symmetry, over-sharpening, glowing eyes, beauty-filter look.",
     "Do not generate text, letters, logos, watermark, labels, UI, modern objects or cartoon style.",
   ]
     .filter(Boolean)
