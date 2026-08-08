@@ -518,6 +518,51 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
+type PdfCopy = {
+  subtitle: string;
+  holder: (name: string) => string;
+  holderFallback: string;
+  offer: string;
+  order: string;
+  story: string;
+  page: string;
+  insignia: string;
+  offers: Record<string, string>;
+};
+
+/**
+ * Libelles du parchemin. Le recit est genere dans la langue du client : les
+ * mentions du gabarit doivent suivre, sinon un parchemin anglais s'ouvre sur
+ * « Decret royal de revelation symbolique ».
+ */
+function pdfCopy(locale?: string | null): PdfCopy {
+  if (locale?.startsWith("en")) {
+    return {
+      subtitle: "Royal decree of symbolic revelation",
+      holder: (name) => `Prepared for ${name}`,
+      holderFallback: "A personal and unique work",
+      offer: "Offer",
+      order: "Order",
+      story: "THE STORY",
+      page: "Page",
+      insignia: "INSIGNIA",
+      offers: { origine: "ORIGIN", ancestral: "REVELATION", famille: "FAMILY", junior: "JUNIOR" },
+    };
+  }
+
+  return {
+    subtitle: "Decret royal de revelation symbolique",
+    holder: (name) => `Prepare pour ${name}`,
+    holderFallback: "Oeuvre personnelle et unique",
+    offer: "Offre",
+    order: "Commande",
+    story: "LE RECIT",
+    page: "Page",
+    insignia: "INSIGNE",
+    offers: { origine: "ORIGINE", ancestral: "REVELATION", famille: "FAMILLE", junior: "JUNIOR" },
+  };
+}
+
 async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
   doc.registerFontkit(fontkit);
@@ -528,6 +573,7 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   const italicFont = await doc.embedFont(StandardFonts.TimesRomanItalic);
   const manuscriptFont = await loadManuscriptFont(doc);
 
+  const copy = pdfCopy(payload.locale);
   const parchment = await loadParchmentBackground(doc);
 
   const firstPage = doc.addPage([width, height]);
@@ -536,7 +582,7 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   drawCentered(
     firstPage,
     italicFont,
-    "Decret royal de revelation symbolique",
+    copy.subtitle,
     13,
     height - 130,
     width,
@@ -583,20 +629,20 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   const titleBottomY = titleY - titleHeight + 28;
 
   const holder = payload.customerName
-    ? `Prepare pour ${payload.customerName}`
-    : "Oeuvre personnelle et unique";
+    ? copy.holder(payload.customerName)
+    : copy.holderFallback;
   drawCentered(firstPage, bodyFont, holder, 12, titleBottomY - 33, width, pdfColor("soft"));
   drawWaxSeal(firstPage, width / 2, firstBox.y + 74, 26, titleFont);
   drawCentered(
     firstPage,
     bodyFont,
-    `Offre: ${payload.offer.toUpperCase()}`,
+    `${copy.offer}: ${copy.offers[payload.offer] ?? payload.offer.toUpperCase()}`,
     10,
     firstBox.y + 118,
     width,
     pdfColor("goldDark"),
   );
-  firstPage.drawText(`Commande: ${payload.orderId}`, {
+  firstPage.drawText(`${copy.order}: ${payload.orderId}`, {
     x: firstBox.x + 18,
     y: firstBox.y + 24,
     size: 8,
@@ -617,6 +663,7 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
     text: payload.text,
     storyPages,
     parchment,
+    copy,
   });
 
   return doc.save();
@@ -634,6 +681,7 @@ function drawStoryFlow(
     text: TotemTextPayload;
     storyPages: TotemStoryPage[];
     parchment: PDFImage | null;
+    copy: PdfCopy;
   },
 ): void {
   const sections = buildStorySections(input.text, input.storyPages);
@@ -732,7 +780,15 @@ function drawStoryFlow(
     }
   }
 
-  drawCentered(cursor.page, input.titleFont, "INSIGNE", 15, cursor.y, input.width, pdfColor("ink"));
+  drawCentered(
+    cursor.page,
+    input.titleFont,
+    input.copy.insignia,
+    15,
+    cursor.y,
+    input.width,
+    pdfColor("ink"),
+  );
   cursor.y -= 30;
   drawWaxSeal(cursor.page, input.width / 2, cursor.y, 23, input.titleFont);
 }
@@ -804,6 +860,7 @@ function createStoryContentPage(
     titleFont: PDFFont;
     bodyFont: PDFFont;
     parchment: PDFImage | null;
+    copy: PdfCopy;
   },
   pageNumber: number,
 ): { page: PDFPage; textX: number; y: number; bottomY: number; maxWidth: number } {
@@ -813,7 +870,7 @@ function createStoryContentPage(
   drawCentered(
     page,
     input.titleFont,
-    "LE RECIT",
+    input.copy.story,
     16,
     input.height - 102,
     input.width,
@@ -836,7 +893,7 @@ function createStoryContentPage(
   drawCentered(
     page,
     input.bodyFont,
-    `Page ${pageNumber}`,
+    `${input.copy.page} ${pageNumber}`,
     8,
     box.y + 34,
     input.width,
