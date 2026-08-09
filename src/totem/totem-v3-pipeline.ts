@@ -50,20 +50,24 @@ export type AdultV3Context = {
 /** `null` quand le client n'a pas repondu : le recit reste alors neutre. */
 export type Gender = "homme" | "femme" | null;
 
-/**
- * Le sexe voyage comme une reponse dediee (questionId « sexe ») : parseAnswers
- * ignore les identifiants non numeriques, le scoring n'en est donc pas affecte
- * et aucune colonne supplementaire n'est necessaire en base.
- */
 /** Consigne de genre inseree dans le prompt du recit. */
 function genderPromptLine(gender: Gender): string {
+  const rule =
+    " Ce choix ne change QUE l'accord du recit : l'archetype, l'animal totem et le clan sont determines par les scores FETA et ne doivent en aucun cas etre modifies par le sexe.";
+
   if (gender === "homme") {
-    return "MASCULIN — l'ancetre est un homme. Accorde tout le recit au masculin (il, cet homme, le pere, l'aieul) et ne laisse aucune formulation neutre ou ambigue.";
+    return (
+      "MASCULIN — l'ancetre est un homme. Accorde tout le recit au masculin (il, cet homme, le pere, l'aieul), sans formulation neutre ou ambigue." +
+      rule
+    );
   }
   if (gender === "femme") {
-    return "FEMININ — l'ancetre est une femme. Accorde tout le recit au feminin (elle, cette femme, la mere, l'aieule) et ne laisse aucune formulation neutre ou ambigue.";
+    return (
+      "FEMININ — l'ancetre est une femme. Accorde tout le recit au feminin (elle, cette femme, la mere, l'aieule), sans formulation neutre ou ambigue." +
+      rule
+    );
   }
-  return "NON DECLARE — garde des formulations qui fonctionnent pour un homme comme pour une femme.";
+  return "NON DECLARE — garde des formulations qui fonctionnent pour un homme comme pour une femme." + rule;
 }
 
 function readGender(answers: QuestionnaireAnswer[]): Gender {
