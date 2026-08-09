@@ -42,8 +42,39 @@ export type AdultV3Context = {
   workTitleEn: string;
   narrativeVariant: "A" | "B" | "C" | "D";
   visualFrame: 1 | 2 | 3 | 4 | 5;
+  /** Sexe declare par le client : genre l'ancetre du recit et du portrait. */
+  gender: Gender;
   imagePrompt: string;
 };
+
+/** `null` quand le client n'a pas repondu : le recit reste alors neutre. */
+export type Gender = "homme" | "femme" | null;
+
+/**
+ * Le sexe voyage comme une reponse dediee (questionId « sexe ») : parseAnswers
+ * ignore les identifiants non numeriques, le scoring n'en est donc pas affecte
+ * et aucune colonne supplementaire n'est necessaire en base.
+ */
+/** Consigne de genre inseree dans le prompt du recit. */
+function genderPromptLine(gender: Gender): string {
+  if (gender === "homme") {
+    return "MASCULIN — l'ancetre est un homme. Accorde tout le recit au masculin (il, cet homme, le pere, l'aieul) et ne laisse aucune formulation neutre ou ambigue.";
+  }
+  if (gender === "femme") {
+    return "FEMININ — l'ancetre est une femme. Accorde tout le recit au feminin (elle, cette femme, la mere, l'aieule) et ne laisse aucune formulation neutre ou ambigue.";
+  }
+  return "NON DECLARE — garde des formulations qui fonctionnent pour un homme comme pour une femme.";
+}
+
+function readGender(answers: QuestionnaireAnswer[]): Gender {
+  const entry = answers.find((a) => /^(sexe|gender)$/i.test(a.questionId.trim()));
+  const value = entry?.answer.trim().toLowerCase();
+  if (value === "homme" || value === "male" || value === "masculin") return "homme";
+  if (value === "femme" || value === "female" || value === "feminin" || value === "féminin") {
+    return "femme";
+  }
+  return null;
+}
 
 const dimensions: Dimension[] = ["F", "E", "T", "A"];
 const zeroScores: Scores = { F: 0, E: 0, T: 0, A: 0 };
@@ -467,6 +498,7 @@ export function buildAdultV3Context(input: {
     season: getSeason(now, language),
     hour: getHourPeriod(now, language),
     answers,
+    gender: readGender(input.answers),
     scores: scored.scores,
     dominant: scored.dominant,
     secondary: scored.secondary,
@@ -498,6 +530,7 @@ Langue : ${context.language}
 Numero mondial : ${context.orderNumber}
 Saison : ${context.season} · Heure : ${context.hour}
 Seed : ${context.seed}
+Sexe de l'ancetre : ${genderPromptLine(context.gender)}
 Scores FETA : F=${context.scores.F} / E=${context.scores.E} / T=${context.scores.T} / A=${context.scores.A}
 Dominante : ${context.dominant} · Secondaire : ${context.secondary}
 
@@ -690,8 +723,15 @@ function buildV3ImagePrompt(context: Omit<AdultV3Context, "imagePrompt">): strin
   // Direction photographique : on cherche une vraie photographie de studio,
   // pas un rendu 3D. Aucun terme du registre « IA » (8k, hyperdetaille,
   // artstation...) qui tire l'image vers le lisse et le synthetique.
+  const person =
+    context.gender === "homme"
+      ? "un homme"
+      : context.gender === "femme"
+        ? "une femme"
+        : "une personne";
+
   return [
-    "Photographie de portrait documentaire, une seule personne, visage coupe en deux",
+    `Photographie de portrait documentaire, ${person}, visage coupe en deux`,
     `moitie gauche ${leftFace}`,
     "moitie droite un veritable masque Ngil Fang en bois sculpte, pigment kaolin blanc use, patine et traces d'outil visibles",
     "transition organique au milieu du visage, sans contour net ni effet de collage",
