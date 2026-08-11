@@ -170,7 +170,7 @@ const archetypes: Record<string, AdultArchetype> = {
   rhinoceros: {
     id: "rhinoceros",
     french: "Rhinocéros",
-    english: "Rhinocéros",
+    english: "Rhinoceros",
     people: "Zulu",
     region: "Afrique du Sud",
     quality: "Détermination",
@@ -210,7 +210,7 @@ const archetypes: Record<string, AdultArchetype> = {
   elephant: {
     id: "elephant",
     french: "Éléphant",
-    english: "Éléphant",
+    english: "Elephant",
     people: "Akan",
     region: "Ghana",
     quality: "Mémoire",
@@ -260,7 +260,7 @@ const archetypes: Record<string, AdultArchetype> = {
   leopard: {
     id: "leopard",
     french: "Léopard",
-    english: "Léopard",
+    english: "Leopard",
     people: "Yoruba",
     region: "Nigeria",
     quality: "Grâce",
@@ -562,6 +562,7 @@ REGLES STRICTES :
 - Ne jamais presenter l'oeuvre comme une verite ethnique ou scientifique.
 - Conditionnel doux pour l'ancetre : "il aurait vecu", jamais "tu es" pour l'ancetre.
 - Pas d'emojis, pas de texte marketing dans le parchemin, pas de cliches.
+- PONCTUATION : n'utilise JAMAIS de tiret (-) ni de tiret cadratin (—) pour separer des mots, des idees ou des phrases, ni comme incise, ni devant un numero. Emploie uniquement une ponctuation francaise correcte : virgule, point, deux-points, point-virgule, parentheses. Le tiret n'est admis qu'a l'interieur d'un mot compose (« sous-bois », « au-dela »).
 - Image : portrait ancestral puissant, visage coupe en deux, moitie gauche visage realiste du totem, moitie droite masque Ngil Fang stylise, cadrage vertical 3:4, portrait rapproche centre, en langage naturel sans parametres techniques.
 
 REPONSE JSON STRICTE, sans Markdown ni texte avant/apres :
