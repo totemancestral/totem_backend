@@ -42,7 +42,10 @@ export type AdultV3Context = {
   workTitleEn: string;
   narrativeVariant: "A" | "B" | "C" | "D";
   visualFrame: 1 | 2 | 3 | 4 | 5;
-  /** Sexe declare par le client : genre l'ancetre du recit et du portrait. */
+  /**
+   * Sexe declare par le client. Unique variable de genre : elle accorde le
+   * recit sur l'ancetre et l'adresse au client (« Cher Fils », « Chere Fille »).
+   */
   gender: Gender;
   imagePrompt: string;
 };
@@ -50,24 +53,36 @@ export type AdultV3Context = {
 /** `null` quand le client n'a pas repondu : le recit reste alors neutre. */
 export type Gender = "homme" | "femme" | null;
 
-/** Consigne de genre inseree dans le prompt du recit. */
-function genderPromptLine(gender: Gender): string {
+/**
+ * Consigne de genre inseree dans le prompt du recit.
+ *
+ * Une seule variable, declaree par le client, pilote les deux accords du
+ * texte : celui qui porte sur l'ancetre (il / elle) et celui qui porte sur le
+ * client lui-meme (« Cher Fils » / « Chere Fille »). L'ancetre se leve a
+ * l'image de la personne, les deux accords sont donc identiques par
+ * construction. Le sexe ne touche jamais l'archetype, l'animal ni le clan, qui
+ * restent determines par les scores FETA.
+ */
+function genderPromptLine(gender: Gender, firstName: string): string {
   const rule =
-    " Ce choix ne change QUE l'accord du recit : l'archetype, l'animal totem et le clan sont determines par les scores FETA et ne doivent en aucun cas etre modifies par le sexe.";
+    " Ce choix ne change QUE les accords du texte : l'archetype, l'animal totem et le clan sont determines par les scores FETA et ne doivent en aucun cas etre modifies par le sexe.";
 
   if (gender === "homme") {
     return (
-      "MASCULIN — l'ancetre est un homme. Accorde tout le recit au masculin (il, cet homme, le pere, l'aieul), sans formulation neutre ou ambigue." +
+      `MASCULIN. Le client est un homme, et l'ancetre se leve a son image : accorde tout le recit au masculin (il, cet homme, le pere, l'aieul), sans formulation neutre ou ambigue. Quand l'ancetre s'adresse au client, il dit « Cher Fils ${firstName} », ou simplement « mon fils », jamais une formule neutre.` +
       rule
     );
   }
   if (gender === "femme") {
     return (
-      "FEMININ — l'ancetre est une femme. Accorde tout le recit au feminin (elle, cette femme, la mere, l'aieule), sans formulation neutre ou ambigue." +
+      `FEMININ. La cliente est une femme, et l'ancetre se leve a son image : accorde tout le recit au feminin (elle, cette femme, la mere, l'aieule), sans formulation neutre ou ambigue. Quand l'ancetre s'adresse a la cliente, il dit « Chere Fille ${firstName} », ou simplement « ma fille », jamais une formule neutre.` +
       rule
     );
   }
-  return "NON DECLARE — garde des formulations qui fonctionnent pour un homme comme pour une femme." + rule;
+  return (
+    "NON DECLARE. Garde des formulations qui fonctionnent pour un homme comme pour une femme, et adresse-toi au client sans marque de genre." +
+    rule
+  );
 }
 
 function readGender(answers: QuestionnaireAnswer[]): Gender {
@@ -534,7 +549,7 @@ Langue : ${context.language}
 Numero mondial : ${context.orderNumber}
 Saison : ${context.season} · Heure : ${context.hour}
 Seed : ${context.seed}
-Sexe de l'ancetre : ${genderPromptLine(context.gender)}
+Genre declare (client et ancetre) : ${genderPromptLine(context.gender, context.firstName)}
 Scores FETA : F=${context.scores.F} / E=${context.scores.E} / T=${context.scores.T} / A=${context.scores.A}
 Dominante : ${context.dominant} · Secondaire : ${context.secondary}
 
@@ -561,6 +576,7 @@ MISSION :
 REGLES STRICTES :
 - Ne jamais presenter l'oeuvre comme une verite ethnique ou scientifique.
 - Conditionnel doux pour l'ancetre : "il aurait vecu", jamais "tu es" pour l'ancetre.
+- ADRESSE AU CLIENT : lorsque l'ancetre parle a ${context.firstName}, il l'appelle « Cher Fils ${context.firstName} » ou « Chere Fille ${context.firstName} » selon le genre declare plus haut, jamais une formule neutre. Le meme genre commande l'accord du recit sur l'ancetre : les deux sont identiques.
 - Pas d'emojis, pas de texte marketing dans le parchemin, pas de cliches.
 - PONCTUATION : n'utilise JAMAIS de tiret (-) ni de tiret cadratin (—) pour separer des mots, des idees ou des phrases, ni comme incise, ni devant un numero. Emploie uniquement une ponctuation francaise correcte : virgule, point, deux-points, point-virgule, parentheses. Le tiret n'est admis qu'a l'interieur d'un mot compose (« sous-bois », « au-dela »).
 - Image : portrait ancestral puissant, visage coupe en deux, moitie gauche visage realiste du totem, moitie droite masque Ngil Fang stylise, cadrage vertical 3:4, portrait rapproche centre, en langage naturel sans parametres techniques.

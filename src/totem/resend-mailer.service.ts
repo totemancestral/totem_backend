@@ -227,7 +227,6 @@ function wrapEmail(title: string, inner: string): string {
           <td valign="middle"><img src="${site}/assets/totem-logo.png" width="42" height="42" alt="" style="display:block;border:0;outline:none"></td>
           <td valign="middle" style="padding-left:13px">
             <div style="letter-spacing:.26em;text-transform:uppercase;color:#d8ad4d;font-size:13px;font-weight:700">TOTEM ANCESTRAL</div>
-            <div style="letter-spacing:.14em;text-transform:uppercase;color:#8a8677;font-size:10px;margin-top:3px">SENYCE PARTNERS</div>
           </td>
         </tr></table>
         <div style="height:1px;background:linear-gradient(90deg,rgba(216,173,77,.6),transparent);margin:22px 0 22px"></div>
@@ -236,7 +235,7 @@ function wrapEmail(title: string, inner: string): string {
       <tr><td style="padding:0 36px 6px;color:#e2e1ee;font-size:15px;line-height:1.66">${inner}</td></tr>
       <tr><td style="padding:26px 36px 32px">
         <div style="height:1px;background:rgba(216,173,77,.18);margin:20px 0 16px"></div>
-        <p style="margin:0;color:#8a8677;font-size:12px">SENYCE PARTNERS &mdash; Totem Ancestral &middot; <a href="mailto:contact@totem-ancestral.com" style="color:#8a8677">contact@totem-ancestral.com</a></p>
+        <p style="margin:0;color:#8a8677;font-size:12px">Totem Ancestral &middot; <a href="mailto:contact@totem-ancestral.com" style="color:#8a8677">contact@totem-ancestral.com</a></p>
       </td></tr>
     </table>
   </td></tr>
