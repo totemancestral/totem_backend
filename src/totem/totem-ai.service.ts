@@ -295,6 +295,8 @@ Contraintes :
 - ancestralName : nom compose unique. Il doit aller au-dela du simple animal.
 - parchmentText : 1500 a 1800 caracteres espaces compris, structure en 5 mouvements.
 - Mouvements obligatoires : L'Ouverture, Le Portrait, L'Epreuve, La Transmission, Le Passage.
+- N'ecris jamais le nom d'un mouvement dans parchmentText. Les mouvements s'enchainent en prose, separes par une ligne vide, sans aucun intitule.
+- PONCTUATION : n'utilise JAMAIS de tiret (-) ni de tiret cadratin (—) pour separer des mots, des idees ou des phrases, ni comme incise, ni devant un numero. Emploie uniquement une ponctuation francaise correcte : virgule, point, deux-points, point-virgule, parentheses. Le tiret n'est admis qu'a l'interieur d'un mot compose (« sous-bois », « au-dela »).
 - storyPages : exactement ${storyPageCount} objets, numerotes de 1 a ${storyPageCount}, reprenant les mouvements du parchemin.
 - Si ${storyPageCount} > 5, les pages supplementaires prolongent le meme recit sans changer d'archetype.
 - Chaque storyPages[i].imagePrompt : meme totem sous forme de portrait ancestral coupe en deux, moitie gauche visage realiste de l'animal totem, moitie droite masque Ngil Fang stylise, sans typographie ni mot visible.
@@ -576,26 +578,38 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   const copy = pdfCopy(payload.locale);
   const parchment = await loadParchmentBackground(doc);
 
+  // PAGE 1 : la couverture. Titre, sous-titre, filet, l'unique image du
+  // totem, le nom ancestral, le destinataire et le sceau de cire.
   const firstPage = doc.addPage([width, height]);
-  const firstBox = drawRoyalParchment(firstPage, width, height, parchment);
-  drawCentered(firstPage, titleFont, "TOTEM ANCESTRAL", 24, height - 102, width, pdfColor("ink"));
+  const cover = drawRoyalParchment(firstPage, width, height, parchment);
+  const coverTop = cover.y + cover.height;
+
+  drawCentered(
+    firstPage,
+    titleFont,
+    "TOTEM ANCESTRAL",
+    ref(40, width),
+    coverTop - ref(40, width),
+    width,
+    pdfColor("ink"),
+  );
   drawCentered(
     firstPage,
     italicFont,
     copy.subtitle,
-    13,
-    height - 130,
+    ref(18, width),
+    coverTop - ref(70, width),
     width,
     pdfColor("soft"),
   );
-  drawCentered(firstPage, bodyFont, "--- * ---", 10, height - 152, width, pdfColor("goldDark"));
+  drawGoldRule(firstPage, width / 2, coverTop - ref(88, width), ref(120, width));
 
-  let titleY = height - 230;
+  let titleY = coverTop - ref(230, width);
   const coverImage = await embedPdfImage(doc, payload.image);
   if (coverImage) {
-    const imageSize = 250;
+    const imageSize = ref(300, width);
     const imageX = width / 2 - imageSize / 2;
-    const imageY = height - 440;
+    const imageY = coverTop - ref(120, width) - imageSize;
     firstPage.drawRectangle({
       x: imageX - 7,
       y: imageY - 7,
@@ -613,55 +627,62 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
       opacity: 0.9,
     });
     firstPage.drawImage(coverImage, { x: imageX, y: imageY, width: imageSize, height: imageSize });
-    titleY = imageY - 52;
+    titleY = imageY - ref(52, width);
   }
 
   const titleHeight = drawCenteredFit(
     firstPage,
     titleFont,
     normalizePdfText(payload.text.ancestralName).toUpperCase(),
-    28,
+    ref(34, width),
     titleY,
     width,
-    width - 112,
+    cover.width,
     pdfColor("ink"),
   );
-  const titleBottomY = titleY - titleHeight + 28;
+  const titleBottomY = titleY - titleHeight + ref(34, width);
 
   const holder = payload.customerName
     ? copy.holder(payload.customerName)
     : copy.holderFallback;
-  drawCentered(firstPage, bodyFont, holder, 12, titleBottomY - 33, width, pdfColor("soft"));
-  drawWaxSeal(firstPage, width / 2, firstBox.y + 74, 26, titleFont);
+  drawCentered(
+    firstPage,
+    manuscriptFont ?? bodyFont,
+    holder,
+    manuscriptFont ? ref(30, width) : ref(20, width),
+    titleBottomY - ref(40, width),
+    width,
+    pdfColor("ink"),
+  );
+
+  drawWaxSeal(firstPage, width / 2, cover.y + ref(74, width), ref(45, width), titleFont);
   drawCentered(
     firstPage,
     bodyFont,
     `${copy.offer}: ${copy.offers[payload.offer] ?? payload.offer.toUpperCase()}`,
-    10,
-    firstBox.y + 118,
+    ref(13, width),
+    cover.y + ref(146, width),
     width,
     pdfColor("goldDark"),
   );
-  firstPage.drawText(`${copy.order}: ${payload.orderId}`, {
-    x: firstBox.x + 18,
-    y: firstBox.y + 24,
-    size: 8,
-    font: bodyFont,
-    color: pdfColor("soft"),
-  });
+  drawCentered(
+    firstPage,
+    bodyFont,
+    `${copy.order}: ${payload.orderId}`,
+    ref(11, width),
+    cover.y,
+    width,
+    pdfColor("soft"),
+  );
 
-  const storyPageCount = Math.max(1, payload.text.storyPages.length || 20);
-  const storyPages = ensureStoryPages(payload.text, storyPageCount);
-
-  drawStoryFlow(doc, {
+  // PAGE 2 : le recit complet, sans titres de mouvements.
+  drawParchmentStory(doc, {
     width,
     height,
     titleFont,
     bodyFont,
-    italicFont,
     manuscriptFont,
-    text: payload.text,
-    storyPages,
+    movements: buildParchmentMovements(payload.text),
     parchment,
     copy,
   });
@@ -669,128 +690,277 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   return doc.save();
 }
 
-function drawStoryFlow(
+/** Filet dore centre, repris du document de reference. */
+function drawGoldRule(page: PDFPage, centerX: number, y: number, ruleWidth: number): void {
+  page.drawRectangle({
+    x: centerX - ruleWidth / 2,
+    y,
+    width: ruleWidth,
+    height: 1.4,
+    color: pdfColor("goldDark"),
+    opacity: 0.75,
+  });
+}
+
+/**
+ * Recit du parchemin : le texte complet, d'un seul tenant, sans titre de
+ * mouvement.
+ *
+ * La page de garde porte l'image ; le recit tient sur une seule page de
+ * parchemin, deux au maximum. Plutot que de couper le texte quand il deborde,
+ * on reduit progressivement le corps jusqu'a ce que tout entre : le lecteur
+ * recoit toujours l'integralite du recit.
+ */
+function drawParchmentStory(
   doc: PDFDocument,
   input: {
     width: number;
     height: number;
     titleFont: PDFFont;
     bodyFont: PDFFont;
-    italicFont: PDFFont;
     manuscriptFont: PDFFont | null;
-    text: TotemTextPayload;
-    storyPages: TotemStoryPage[];
+    movements: string[];
     parchment: PDFImage | null;
     copy: PdfCopy;
   },
 ): void {
-  const sections = buildStorySections(input.text, input.storyPages);
-  let pageNumber = 1;
-  let cursor = createStoryContentPage(doc, input, pageNumber);
+  const MAX_STORY_PAGES = 2;
+  const font = input.manuscriptFont ?? input.bodyFont;
+  const paragraphs = input.movements.filter((movement) => movement.trim().length > 0);
+  if (paragraphs.length === 0) return;
 
-  // Le parchemin livré ne doit jamais dépasser 3 pages (page de garde incluse).
-  const MAX_PARCHMENT_PAGES = 3;
-  let stopped = false;
-  const tryNewPage = (): boolean => {
-    if (doc.getPageCount() >= MAX_PARCHMENT_PAGES) return false;
-    pageNumber += 1;
-    cursor = createStoryContentPage(doc, input, pageNumber);
-    return true;
-  };
+  const box = parchmentContentBox(input.width, input.height);
 
-  for (const section of sections) {
-    if (stopped) break;
-    const titleSize = 10;
-    const titleLines = wrapPdfText(
-      section.title.toUpperCase(),
-      input.titleFont,
-      titleSize,
-      cursor.maxWidth - 24,
-    );
-    const neededTitleHeight = titleLines.length * 13 + 8;
-    if (cursor.y - neededTitleHeight < cursor.bottomY && !tryNewPage()) {
-      stopped = true;
-      break;
-    }
+  // Seule la premiere page du recit porte l'en-tete ; seule la derniere
+  // reserve la place de l'insigne et du sceau.
+  const headerHeight = ref(96, input.width);
+  const sealHeight = ref(130, input.width);
 
-    for (const titleLine of titleLines) {
-      cursor.page.drawText(titleLine, {
-        x:
-          cursor.textX +
-          cursor.maxWidth / 2 -
-          input.titleFont.widthOfTextAtSize(titleLine, titleSize) / 2,
-        y: cursor.y,
-        size: titleSize,
-        font: input.titleFont,
-        color: pdfColor("goldDark"),
-      });
-      cursor.y -= 13;
-    }
-    cursor.y -= 4;
+  const layout = fitParchmentText({
+    paragraphs,
+    font,
+    manuscript: Boolean(input.manuscriptFont),
+    maxWidth: box.width,
+    firstPageHeight: box.height - headerHeight,
+    otherPageHeight: box.height,
+    sealHeight,
+    maxPages: MAX_STORY_PAGES,
+  });
 
-    const paragraphs = section.text
-      .split(/\n{2,}/)
-      .map((paragraph) => paragraph.trim())
-      .filter(Boolean);
+  // Un mouvement n'est jamais coupe entre deux pages : on remplit la premiere
+  // page de mouvements entiers, le reste passe sur la seconde.
+  const spread = spreadOverPages(layout, {
+    firstPageHeight: box.height - headerHeight,
+    otherPageHeight: box.height,
+    sealHeight,
+  });
 
-    for (const paragraph of paragraphs) {
-      if (stopped) break;
-      const paragraphFont =
-        input.manuscriptFont ?? (section.index % 2 === 0 ? input.italicFont : input.bodyFont);
-      const paragraphSize = input.manuscriptFont ? 12.2 : 9.4;
-      const paragraphLineHeight = input.manuscriptFont ? 17.2 : 14;
-      const lines = wrapPdfText(
-        paragraph,
-        paragraphFont,
-        paragraphSize,
-        cursor.maxWidth,
-        Boolean(input.manuscriptFont),
-      );
+  let cursor = openStoryPage(doc, input, box, headerHeight, true);
 
-      for (const line of lines) {
-        if (cursor.y - paragraphLineHeight < cursor.bottomY && !tryNewPage()) {
-          stopped = true;
-          break;
-        }
-
+  spread.forEach((pageBlocks, pageIndex) => {
+    if (pageIndex > 0) cursor = openStoryPage(doc, input, box, headerHeight, false);
+    for (const block of pageBlocks) {
+      for (const line of block) {
         cursor.page.drawText(line, {
-          x: cursor.textX,
+          x: box.x,
           y: cursor.y,
-          size: paragraphSize,
-          font: paragraphFont,
+          size: layout.fontSize,
+          font,
           color: pdfColor("ink"),
         });
-        cursor.y -= paragraphLineHeight;
+        cursor.y -= layout.lineHeight;
       }
-
-      cursor.y -= 7;
+      cursor.y -= layout.paragraphGap;
     }
+  });
 
-    cursor.y -= 8;
-  }
-
-  // Sceau final : nouvelle page uniquement si le plafond n'est pas atteint,
-  // sinon on remonte le curseur pour le poser en bas de la dernière page.
-  if (cursor.y - 80 < cursor.bottomY) {
-    if (doc.getPageCount() < MAX_PARCHMENT_PAGES) {
-      pageNumber += 1;
-      cursor = createStoryContentPage(doc, input, pageNumber);
-    } else {
-      cursor.y = cursor.bottomY + 80;
-    }
-  }
-
+  // Insigne et sceau, poses en pied de la derniere page du recit.
   drawCentered(
     cursor.page,
     input.titleFont,
     input.copy.insignia,
-    15,
-    cursor.y,
+    ref(20, input.width),
+    box.y + ref(100, input.width),
     input.width,
     pdfColor("ink"),
   );
-  cursor.y -= 30;
-  drawWaxSeal(cursor.page, input.width / 2, cursor.y, 23, input.titleFont);
+  drawWaxSeal(
+    cursor.page,
+    input.width / 2,
+    box.y + ref(46, input.width),
+    ref(38, input.width),
+    input.titleFont,
+  );
+}
+
+/**
+ * Repartit les mouvements sur les pages du recit sans jamais en couper un.
+ * La derniere page garde la place de l'insigne et du sceau.
+ */
+function spreadOverPages(
+  layout: { blocks: string[][]; lineHeight: number; paragraphGap: number; pages: number },
+  heights: { firstPageHeight: number; otherPageHeight: number; sealHeight: number },
+): string[][][] {
+  const spread: string[][][] = [[]];
+  const heightOf = (index: number) =>
+    index === 0 ? heights.firstPageHeight : heights.otherPageHeight;
+  // Tant qu'il reste des pages autorisees, la page courante n'est pas la
+  // derniere : elle n'a donc pas a reserver la place du sceau.
+  const availableOn = (index: number) =>
+    heightOf(index) - (index === layout.pages - 1 ? heights.sealHeight : 0);
+
+  let pageIndex = 0;
+  let remaining = availableOn(0);
+
+  for (const block of layout.blocks) {
+    const needed = block.length * layout.lineHeight + layout.paragraphGap;
+    if (needed > remaining && pageIndex + 1 < layout.pages) {
+      pageIndex += 1;
+      spread.push([]);
+      remaining = availableOn(pageIndex);
+    }
+    spread[pageIndex]?.push(block);
+    remaining -= needed;
+  }
+
+  return spread;
+}
+
+/** Ouvre une page de recit et renvoie le curseur d'ecriture. */
+function openStoryPage(
+  doc: PDFDocument,
+  input: { width: number; height: number; titleFont: PDFFont; parchment: PDFImage | null; copy: PdfCopy },
+  box: { x: number; y: number; width: number; height: number },
+  headerHeight: number,
+  withHeader: boolean,
+): { page: PDFPage; y: number } {
+  const page = doc.addPage([input.width, input.height]);
+  drawRoyalParchment(page, input.width, input.height, input.parchment);
+
+  const top = box.y + box.height;
+  if (!withHeader) return { page, y: top };
+
+  drawCentered(
+    page,
+    input.titleFont,
+    input.copy.story,
+    ref(34, input.width),
+    top - ref(34, input.width),
+    input.width,
+    pdfColor("ink"),
+  );
+  drawGoldRule(page, input.width / 2, top - ref(54, input.width), ref(120, input.width));
+
+  return { page, y: top - headerHeight };
+}
+
+/**
+ * Cherche le plus grand corps de texte qui fasse tenir l'integralite du recit
+ * dans le nombre de pages autorise. Renvoie les lignes deja decoupees pour
+ * eviter de refaire le calcul au moment du trace.
+ */
+function fitParchmentText(input: {
+  paragraphs: string[];
+  font: PDFFont;
+  manuscript: boolean;
+  maxWidth: number;
+  /** Hauteur disponible sur la premiere page, en-tete deduit. */
+  firstPageHeight: number;
+  /** Hauteur disponible sur les pages suivantes, sans en-tete. */
+  otherPageHeight: number;
+  /** Place reservee a l'insigne et au sceau, sur la derniere page seulement. */
+  sealHeight: number;
+  maxPages: number;
+}): {
+  blocks: string[][];
+  fontSize: number;
+  lineHeight: number;
+  paragraphGap: number;
+  pages: number;
+} {
+  const startSize = input.manuscript ? 20 : 13;
+  const minSize = input.manuscript ? 11 : 8.5;
+
+  /** Hauteur de texte tenant sur `count` pages, sceau final compris. */
+  const capacity = (count: number) =>
+    input.firstPageHeight +
+    Math.max(0, count - 1) * input.otherPageHeight -
+    input.sealHeight;
+
+  let fontSize = startSize;
+  let blocks: string[][] = [];
+  let lineHeight = fontSize * 1.55;
+  let paragraphGap = fontSize * 0.7;
+  let pages = 1;
+
+  for (;;) {
+    lineHeight = fontSize * 1.55;
+    paragraphGap = fontSize * 0.7;
+    blocks = input.paragraphs.map((paragraph) =>
+      wrapPdfText(paragraph, input.font, fontSize, input.maxWidth, input.manuscript),
+    );
+    const needed =
+      blocks.reduce((total, block) => total + block.length * lineHeight, 0) +
+      Math.max(0, blocks.length - 1) * paragraphGap;
+
+    pages = 1;
+    while (needed > capacity(pages) && pages < input.maxPages) pages += 1;
+
+    if (needed <= capacity(pages) || fontSize <= minSize) break;
+    fontSize -= 0.4;
+  }
+
+  return { blocks, fontSize, lineHeight, paragraphGap, pages };
+}
+
+/**
+ * Decoupe le Parchemin Ancestral en mouvements.
+ *
+ * Le modele separe ses cinq mouvements par une ligne vide. Les intitules
+ * ("Le Portrait", "L'Epreuve"...) ne doivent pas apparaitre sur le parchemin :
+ * on retire donc toute ligne d'ouverture qui n'est qu'un titre de mouvement.
+ * Les pages de recit renvoyees par le modele reprennent le meme texte, elles
+ * ne sont pas reprises ici pour ne pas dupliquer le recit.
+ */
+function buildParchmentMovements(text: TotemTextPayload): string[] {
+  const source = text.parchmentText.trim()
+    ? text.parchmentText
+    : text.storyPages.map((page) => page.text).join("\n\n");
+
+  return source
+    .split(/\n{2,}/)
+    .map((movement) => stripMovementHeading(movement.trim()))
+    .filter((movement) => movement.length > 0);
+}
+
+const MOVEMENT_HEADINGS = [
+  "l'ouverture",
+  "le portrait",
+  "l'epreuve",
+  "la transmission",
+  "le passage",
+  "prologue",
+  "the opening",
+  "the portrait",
+  "the trial",
+  "the transmission",
+  "the passage",
+];
+
+function stripMovementHeading(movement: string): string {
+  const lines = movement.split("\n");
+  const first = (lines[0] ?? "").trim();
+  const normalized = first
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/^[\s*#>-]+|[\s:.*_-]+$/g, "")
+    .toLowerCase();
+
+  // Un intitule tient sur une ligne courte et ne se termine pas par une phrase.
+  if (first.length <= 40 && MOVEMENT_HEADINGS.includes(normalized)) {
+    return lines.slice(1).join("\n").trim();
+  }
+  return movement;
 }
 
 async function loadManuscriptFont(doc: PDFDocument): Promise<PDFFont | null> {
@@ -852,77 +1022,6 @@ function manuscriptFontUrls(): string[] {
   ];
 }
 
-function createStoryContentPage(
-  doc: PDFDocument,
-  input: {
-    width: number;
-    height: number;
-    titleFont: PDFFont;
-    bodyFont: PDFFont;
-    parchment: PDFImage | null;
-    copy: PdfCopy;
-  },
-  pageNumber: number,
-): { page: PDFPage; textX: number; y: number; bottomY: number; maxWidth: number } {
-  const page = doc.addPage([input.width, input.height]);
-  const box = drawRoyalParchment(page, input.width, input.height, input.parchment);
-
-  drawCentered(
-    page,
-    input.titleFont,
-    input.copy.story,
-    16,
-    input.height - 102,
-    input.width,
-    pdfColor("goldDark"),
-  );
-  drawCentered(
-    page,
-    input.bodyFont,
-    "--- * ---",
-    10,
-    input.height - 124,
-    input.width,
-    pdfColor("goldDark"),
-  );
-
-  // Le totem n'est illustré qu'une seule fois, en page de garde : les pages de
-  // recit restent du texte manuscrit sur parchemin (cf. totem-parchemin/).
-  const y = input.height - 156;
-
-  drawCentered(
-    page,
-    input.bodyFont,
-    `${input.copy.page} ${pageNumber}`,
-    8,
-    box.y + 34,
-    input.width,
-    pdfColor("soft"),
-  );
-
-  return {
-    page,
-    textX: box.x + 48,
-    y,
-    bottomY: box.y + 78,
-    maxWidth: box.width - 96,
-  };
-}
-
-
-function buildStorySections(
-  text: TotemTextPayload,
-  storyPages: TotemStoryPage[],
-): Array<{ index: number; title: string; text: string }> {
-  return [
-    { index: 0, title: "Prologue", text: text.parchmentText },
-    ...storyPages.map((page, index) => ({
-      index: index + 1,
-      title: page.title,
-      text: page.text,
-    })),
-  ].filter((section) => section.text.trim().length > 0);
-}
 
 /**
  * Charge le parchemin (rouleau ouvert avec ses tringles) servant de fond aux
@@ -946,273 +1045,98 @@ async function loadParchmentBackground(doc: PDFDocument): Promise<PDFImage | nul
   return null;
 }
 
+/**
+ * Gabarit d'une page de parchemin, transpose du document de reference
+ * `totem-parchemin/components/totem/ParchmentPdfDocument.tsx` :
+ * fond sombre, cadre dore, rouleau `parchemin_ouvert.png` etire sur toute la
+ * zone interieure, puis une colonne de texte en retrait de 13 % en largeur et
+ * de 11 % en hauteur, pour que rien ne vienne mordre sur les tringles.
+ *
+ * Les proportions du document de reference sont exprimees en pixels a 96 dpi
+ * (794 x 1123). On les ramene ici en points PDF (595 x 842).
+ */
+const PARCHMENT_REFERENCE_WIDTH = 794;
+const PAGE_PADDING = 26;
+const FRAME_INSET = 14;
+// Les bords du rouleau sont dechires : on garde un retrait un peu plus large
+// que celui du document de reference pour que jamais une lettre ne tombe sur
+// le vide entre deux dechirures.
+const CONTENT_INSET_X = 0.16;
+const CONTENT_INSET_Y = 0.125;
+
+/** Convertit une mesure du document de reference en points PDF. */
+function ref(value: number, pageWidth: number): number {
+  return (value * pageWidth) / PARCHMENT_REFERENCE_WIDTH;
+}
+
+/** Colonne d'ecriture d'une page, calculee sans rien tracer. */
+function parchmentContentBox(
+  width: number,
+  height: number,
+): { x: number; y: number; width: number; height: number } {
+  const padding = ref(PAGE_PADDING, width);
+  const sheetWidth = width - padding * 2;
+  const sheetHeight = height - padding * 2;
+  const insetX = sheetWidth * CONTENT_INSET_X;
+  const insetY = sheetHeight * CONTENT_INSET_Y;
+
+  return {
+    x: padding + insetX,
+    y: padding + insetY,
+    width: sheetWidth - insetX * 2,
+    height: sheetHeight - insetY * 2,
+  };
+}
+
 function drawRoyalParchment(
   page: PDFPage,
   width: number,
   height: number,
   background: PDFImage | null,
 ): { x: number; y: number; width: number; height: number } {
-  const scrollWidth = Math.min(470, width - 82);
-  const x = width / 2 - scrollWidth / 2;
-  const topRodY = height - 82;
-  const bottomRodY = 46;
-  const rodHeight = 26;
-  const curlHeight = 22;
-  const bodyY = bottomRodY + rodHeight + curlHeight;
-  const bodyH = topRodY - bodyY - curlHeight;
+  const padding = ref(PAGE_PADDING, width);
+  const frame = ref(FRAME_INSET, width);
 
-  // Le parchemin réel occupe toute la page ; la zone d'écriture reste celle du
-  // rouleau vectoriel pour conserver la mise en page (texte posé sur le papier,
-  // jamais sur les tringles).
+  // Fond sombre de la page, puis le cadre dore du document de reference.
+  page.drawRectangle({ x: 0, y: 0, width, height, color: rgb(0.051, 0.051, 0.071) });
+  page.drawRectangle({
+    x: frame,
+    y: frame,
+    width: width - frame * 2,
+    height: height - frame * 2,
+    borderColor: pdfColor("goldDark"),
+    borderWidth: 1.5,
+  });
+
+  const sheetX = padding;
+  const sheetY = padding;
+  const sheetWidth = width - padding * 2;
+  const sheetHeight = height - padding * 2;
+
   if (background) {
-    page.drawImage(background, { x: 0, y: 0, width, height });
-    return { x, y: bodyY, width: scrollWidth, height: bodyH };
-  }
-
-  drawScene(page, width, height);
-  drawRod(page, x, topRodY, scrollWidth, rodHeight);
-  drawRod(page, x, bottomRodY, scrollWidth, rodHeight);
-  drawCurl(page, x, topRodY - curlHeight, scrollWidth, curlHeight, "top");
-  drawCurl(page, x, bodyY - curlHeight, scrollWidth, curlHeight, "bottom");
-  drawParchmentBody(page, x, bodyY, scrollWidth, bodyH);
-
-  return { x, y: bodyY, width: scrollWidth, height: bodyH };
-}
-
-
-
-
-function drawFittedParagraph(
-  page: PDFPage,
-  font: PDFFont,
-  text: string,
-  x: number,
-  topY: number,
-  bottomY: number,
-  maxWidth: number,
-): void {
-  let fontSize = 10;
-  let lineHeight = 15;
-  let lines = wrapPdfText(text, font, fontSize, maxWidth);
-
-  while (lines.length * lineHeight > topY - bottomY && fontSize > 8.2) {
-    fontSize -= 0.4;
-    lineHeight = fontSize * 1.45;
-    lines = wrapPdfText(text, font, fontSize, maxWidth);
-  }
-
-  const maxLines = Math.max(1, Math.floor((topY - bottomY) / lineHeight));
-  const visibleLines = lines.slice(0, maxLines);
-  if (visibleLines.length < lines.length && visibleLines.length > 0) {
-    const last = visibleLines[visibleLines.length - 1] ?? "";
-    visibleLines[visibleLines.length - 1] = `${last.replace(/[.,;:]?$/, "")}...`;
-  }
-
-  let y = topY;
-  visibleLines.forEach((line) => {
-    page.drawText(line, {
-      x,
-      y,
-      size: fontSize,
-      font,
-      color: pdfColor("ink"),
+    page.drawImage(background, {
+      x: sheetX,
+      y: sheetY,
+      width: sheetWidth,
+      height: sheetHeight,
     });
-    y -= lineHeight;
-  });
-}
-
-function drawScene(page: PDFPage, width: number, height: number): void {
-  page.drawRectangle({ x: 0, y: 0, width, height, color: rgb(0.055, 0.024, 0.006) });
-  for (let i = 0; i < 18; i += 1) {
-    page.drawCircle({
-      x: width * 0.42,
-      y: height * 0.64,
-      size: width * (0.76 - i * 0.032),
-      color: rgb(0.165, 0.083, 0.024),
-      opacity: 0.025,
-    });
-  }
-}
-
-function drawRod(page: PDFPage, x: number, y: number, width: number, height: number): void {
-  const bands = [
-    { c: rgb(0.91, 0.72, 0.29), o: 1 },
-    { c: rgb(0.54, 0.32, 0.05), o: 0.95 },
-    { c: rgb(0.76, 0.48, 0.13), o: 0.95 },
-    { c: rgb(0.48, 0.26, 0.04), o: 0.95 },
-    { c: rgb(0.89, 0.66, 0.19), o: 1 },
-  ];
-  const bandH = height / bands.length;
-  bands.forEach((band, index) => {
+  } else {
+    // L'asset est indispensable au rendu voulu : sans lui on pose un papier
+    // uni de la meme teinte plutot qu'un rouleau dessine qui ne respecterait
+    // pas la forme attendue. La mise en page, elle, reste identique.
+    console.error("[pdf] parchemin_ouvert.png introuvable, rendu sur fond uni");
     page.drawRectangle({
-      x,
-      y: y + index * bandH,
-      width,
-      height: bandH + 0.5,
-      color: band.c,
-      opacity: band.o,
-    });
-  });
-  page.drawCircle({ x: x - 4, y: y + height / 2, size: 17, color: rgb(0.69, 0.47, 0.11) });
-  page.drawCircle({ x: x + width + 4, y: y + height / 2, size: 17, color: rgb(0.69, 0.47, 0.11) });
-  page.drawCircle({
-    x: x - 8,
-    y: y + height / 2 + 5,
-    size: 6,
-    color: rgb(0.96, 0.82, 0.44),
-    opacity: 0.65,
-  });
-  page.drawCircle({
-    x: x + width,
-    y: y + height / 2 + 5,
-    size: 6,
-    color: rgb(0.96, 0.82, 0.44),
-    opacity: 0.65,
-  });
-}
-
-function drawCurl(
-  page: PDFPage,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  direction: "top" | "bottom",
-): void {
-  const colors =
-    direction === "top"
-      ? [rgb(0.6, 0.36, 0.06), rgb(0.78, 0.53, 0.16), rgb(0.88, 0.69, 0.33)]
-      : [rgb(0.88, 0.69, 0.33), rgb(0.78, 0.53, 0.16), rgb(0.6, 0.36, 0.06)];
-  const bandH = height / colors.length;
-  colors.forEach((color, index) => {
-    page.drawRectangle({ x, y: y + index * bandH, width, height: bandH + 0.5, color });
-  });
-}
-
-function drawParchmentBody(
-  page: PDFPage,
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-): void {
-  const bands = 32;
-  for (let i = 0; i < bands; i += 1) {
-    const t = i / (bands - 1);
-    page.drawRectangle({
-      x,
-      y: y + (height / bands) * i,
-      width,
-      height: height / bands + 0.6,
-      color: parchmentGradient(t),
+      x: sheetX,
+      y: sheetY,
+      width: sheetWidth,
+      height: sheetHeight,
+      color: rgb(0.898, 0.843, 0.729),
     });
   }
 
-  for (let lineY = y + 27; lineY < y + height - 16; lineY += 27) {
-    page.drawLine({
-      start: { x: x + 18, y: lineY },
-      end: { x: x + width - 18, y: lineY + pseudoJitter(lineY) },
-      color: rgb(0.63, 0.43, 0.12),
-      opacity: 0.07,
-      thickness: 0.45,
-    });
-  }
-
-  page.drawRectangle({ x, y, width: 50, height, color: rgb(0.35, 0.16, 0.0), opacity: 0.12 });
-  page.drawRectangle({
-    x: x + width - 50,
-    y,
-    width: 50,
-    height,
-    color: rgb(0.35, 0.16, 0.0),
-    opacity: 0.1,
-  });
-  page.drawRectangle({
-    x,
-    y: y + height - 46,
-    width,
-    height: 46,
-    color: rgb(0.35, 0.16, 0.0),
-    opacity: 0.1,
-  });
-  page.drawRectangle({ x, y, width, height: 46, color: rgb(0.35, 0.16, 0.0), opacity: 0.1 });
-
-  const ragged = raggedRectPath(x, y, width, height);
-  page.drawSvgPath(ragged, { borderColor: rgb(0.54, 0.28, 0.06), borderWidth: 1.1, opacity: 0.58 });
-  page.drawRectangle({
-    x: x + 22,
-    y: y + 22,
-    width: width - 44,
-    height: height - 44,
-    borderColor: rgb(0.77, 0.52, 0.15),
-    borderWidth: 0.55,
-    opacity: 0.42,
-  });
+  return parchmentContentBox(width, height);
 }
 
-function parchmentGradient(t: number): ReturnType<typeof rgb> {
-  type ColorStop = [number, [number, number, number]];
-  const stops: ColorStop[] = [
-    [0, [0.941, 0.875, 0.627]],
-    [0.2, [0.91, 0.8, 0.502]],
-    [0.4, [0.957, 0.894, 0.659]],
-    [0.55, [0.867, 0.753, 0.439]],
-    [0.72, [0.929, 0.847, 0.596]],
-    [1, [0.941, 0.875, 0.627]],
-  ];
-  let left: ColorStop = stops[0]!;
-  let right: ColorStop = stops[stops.length - 1]!;
-  for (let i = 0; i < stops.length - 1; i += 1) {
-    const current = stops[i]!;
-    const next = stops[i + 1]!;
-    if (t >= current[0] && t <= next[0]) {
-      left = current;
-      right = next;
-      break;
-    }
-  }
-  const span = right[0] - left[0] || 1;
-  const k = (t - left[0]) / span;
-  return rgb(
-    left[1][0] + (right[1][0] - left[1][0]) * k,
-    left[1][1] + (right[1][1] - left[1][1]) * k,
-    left[1][2] + (right[1][2] - left[1][2]) * k,
-  );
-}
-
-function raggedRectPath(x: number, y: number, width: number, height: number): string {
-  const top = raggedEdge(x, y + height, x + width, y + height, false, 17);
-  const right = raggedEdge(x + width, y + height, x + width, y, true, 18).slice(1);
-  const bottom = raggedEdge(x + width, y, x, y, false, 19).slice(1);
-  const left = raggedEdge(x, y, x, y + height, true, 20).slice(1);
-  return `${top} ${right} ${bottom} ${left} Z`;
-}
-
-function raggedEdge(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  vertical: boolean,
-  seed: number,
-): string {
-  const steps = vertical ? 18 : 22;
-  const points: string[] = [];
-  for (let i = 0; i <= steps; i += 1) {
-    const t = i / steps;
-    const baseX = x1 + (x2 - x1) * t;
-    const baseY = y1 + (y2 - y1) * t;
-    const jitter = (pseudoRandom(seed + i * 31) * 2 - 1) * 3.8;
-    const chip =
-      pseudoRandom(seed + i * 47) > 0.82
-        ? (pseudoRandom(seed + i * 53) * 2 + 1) * Math.sign(jitter || 1)
-        : 0;
-    const px = baseX + (vertical ? jitter + chip : 0);
-    const py = baseY + (vertical ? 0 : jitter + chip);
-    points.push(`${i === 0 ? "M" : "L"} ${px.toFixed(1)} ${py.toFixed(1)}`);
-  }
-  return points.join(" ");
-}
 
 function drawWaxSeal(page: PDFPage, x: number, y: number, size: number, font: PDFFont): void {
   page.drawCircle({ x, y, size: size + 5, color: rgb(0.42, 0.0, 0.0), opacity: 0.38 });
@@ -1241,14 +1165,6 @@ function drawWaxSeal(page: PDFPage, x: number, y: number, size: number, font: PD
   drawCentered(page, font, "TA", 12, y - 4, x * 2, pdfColor("gold"));
 }
 
-function pseudoJitter(value: number): number {
-  return (pseudoRandom(value) - 0.5) * 3;
-}
-
-function pseudoRandom(value: number): number {
-  const x = Math.sin(value + 1) * 43758.5453;
-  return x - Math.floor(x);
-}
 
 function drawCentered(
   page: PDFPage,
