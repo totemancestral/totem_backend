@@ -8,6 +8,10 @@ import { hasEnoughAnswersForGeneration } from "./stripe-webhook.service";
 
 const completeOrderSchema = z.object({
   externalCommandId: z.string().uuid(),
+  // Les dix questions du parcours, plus les entrees de contexte que le site
+  // peut joindre (le sexe declare sur le profil, par exemple). Un compte exact
+  // rendait la chaine cassante : toute entree supplementaire faisait echouer
+  // l'appel en silence et la commande n'etait jamais mise en file.
   answers: z
     .array(
       z.object({
@@ -15,7 +19,8 @@ const completeOrderSchema = z.object({
         answer: z.string().min(1).max(4000),
       }),
     )
-    .length(10),
+    .min(10)
+    .max(16),
   locale: z.string().min(2).max(12).optional(),
 });
 
