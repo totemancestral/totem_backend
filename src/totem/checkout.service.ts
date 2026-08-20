@@ -6,7 +6,8 @@ import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemOffer } from "./totem.types";
-import { computeScores, computeReveal } from "./junior.service";
+import { juniorAnswersSchema } from "./junior-answers";
+import { OFFER_LABELS, TOTEM_PRICES_CENTS } from "./prices";
 
 const adultCheckoutSchema = z.object({
   offer: z.enum(["origine", "ancestral", "famille"]),
@@ -18,9 +19,12 @@ const adultCheckoutSchema = z.object({
         answer: z.string().min(1).max(4000),
       }),
     )
-    .min(4)
-    .max(10),
-  locale: z.string().min(2).max(12).optional(),
+      // Le sexe est un contexte hors questionnaire et peut porter le total a 11.
+      .min(4)
+      .max(11),
+    locale: z.string().min(2).max(12).optional(),
+  questionnaireVersion: z.string().min(1).max(32).optional(),
+  indicators: z.record(z.string(), z.boolean()).optional(),
   customerName: z.string().min(1).max(120).optional(),
   successUrl: z.string().url().max(500).optional(),
   cancelUrl: z.string().url().max(500).optional(),
@@ -30,12 +34,7 @@ const juniorCheckoutSchema = z.object({
   offer: z.literal("junior"),
   externalCommandId: z.string().min(1).max(120).optional(),
   firstName: z.string().trim().max(40).optional(),
-  answers: z.record(
-    z.string(),
-    z.object({
-      choice: z.enum(["A", "B", "C", "D"]),
-    }),
-  ),
+  answers: juniorAnswersSchema,
   locale: z.enum(["fr", "en"]).optional(),
   successUrl: z.string().url().max(500).optional(),
   cancelUrl: z.string().url().max(500).optional(),
@@ -49,13 +48,6 @@ const checkoutInputSchema = z.discriminatedUnion("offer", [
 type AdultCheckoutInput = z.infer<typeof adultCheckoutSchema>;
 type JuniorCheckoutInput = z.infer<typeof juniorCheckoutSchema>;
 export type CheckoutInput = AdultCheckoutInput | JuniorCheckoutInput;
-
-const OFFER_LABELS: Record<TotemOffer, string> = {
-  origine: "TOTEM ANCESTRAL - Origine",
-  ancestral: "TOTEM ANCESTRAL - Ancestral",
-  famille: "TOTEM ANCESTRAL - Famille",
-  junior: "TOTEM JUNIOR",
-};
 
 @Injectable()
 export class CheckoutService {
@@ -74,10 +66,10 @@ export class CheckoutService {
     this.successUrl = config.getOrThrow<string>("CHECKOUT_SUCCESS_URL");
     this.cancelUrl = config.getOrThrow<string>("CHECKOUT_CANCEL_URL");
     this.offerPrices = {
-      origine: config.getOrThrow<number>("TOTEM_PRICE_ORIGINE_CENTS"),
-      ancestral: config.getOrThrow<number>("TOTEM_PRICE_ANCESTRAL_CENTS"),
-      famille: config.getOrThrow<number>("TOTEM_PRICE_FAMILLE_CENTS"),
-      junior: config.getOrThrow<number>("TOTEM_PRICE_JUNIOR_CENTS"),
+      origine: config.get<number>("TOTEM_PRICE_ORIGINE_CENTS") ?? TOTEM_PRICES_CENTS.origine,
+      ancestral: config.get<number>("TOTEM_PRICE_ANCESTRAL_CENTS") ?? TOTEM_PRICES_CENTS.ancestral,
+      famille: config.get<number>("TOTEM_PRICE_FAMILLE_CENTS") ?? TOTEM_PRICES_CENTS.famille,
+      junior: config.get<number>("TOTEM_PRICE_JUNIOR_CENTS") ?? TOTEM_PRICES_CENTS.junior,
     };
   }
 
@@ -85,7 +77,7 @@ export class CheckoutService {
     body: unknown;
     userId: string;
     email?: string;
-  }): Promise<{ id: string; url: string | null; reveal?: Record<string, unknown> }> {
+  }): Promise<{ id: string; url: string | null }> {
     const payload = this.readInput(input.body);
     const amount = this.offerPrices[payload.offer];
 
@@ -128,7 +120,14 @@ export class CheckoutService {
     });
 
     if (payload.offer === "junior") {
-      return this.createJuniorOrder({ payload, session, amount, userId: input.userId, email: input.email });
+      return this.createJuniorOrder({
+        payload,
+        session,
+        amount,
+        userId: input.userId,
+        email: input.email,
+        externalCommandId: payload.externalCommandId,
+      });
     }
 
     const order = await this.prisma.totemOrder.create({
@@ -142,7 +141,11 @@ export class CheckoutService {
         offer: payload.offer,
         amountCents: amount,
         currency: "EUR",
-        answers: payload.answers as unknown as Prisma.InputJsonValue,
+        answers: {
+          answers: payload.answers,
+          questionnaireVersion: payload.questionnaireVersion ?? "griot-v2",
+          indicators: payload.indicators ?? {},
+        } as unknown as Prisma.InputJsonValue,
       },
     });
 
@@ -168,11 +171,9 @@ export class CheckoutService {
     amount: number;
     userId: string;
     email?: string;
+    externalCommandId?: string;
   }) {
-    const { payload, session, amount, userId, email } = input;
-
-    const scores = computeScores(payload.answers);
-    const reveal = computeReveal(scores, payload.firstName);
+    const { payload, session, amount, userId, email, externalCommandId } = input;
 
     const order = await this.prisma.totemOrder.create({
       data: {
@@ -186,16 +187,7 @@ export class CheckoutService {
         amountCents: amount,
         currency: "EUR",
         answers: payload.answers as unknown as Prisma.InputJsonValue,
-        juniorPayload: {
-          scores,
-          dominant: reveal.dominant,
-          secondary: reveal.secondary,
-          totemName: reveal.name,
-          quality: reveal.quality,
-          orderNumber: reveal.orderNumber,
-          phrase: reveal.phrase,
-          share: reveal.share,
-        },
+        juniorPayload: undefined,
       },
     });
 
@@ -210,18 +202,15 @@ export class CheckoutService {
       },
     });
 
+    await this.mirror.attachCheckoutSession({
+      externalCommandId,
+      userId,
+      checkoutSessionId: session.id,
+    });
+
     return {
       id: session.id,
       url: session.url,
-      reveal: {
-        orderNumber: reveal.orderNumber,
-        scores,
-        dominant: reveal.dominant,
-        secondary: reveal.secondary,
-        totem: { name: reveal.name, quality: reveal.quality },
-        phrase: reveal.phrase,
-        share: reveal.share,
-      },
     };
   }
 

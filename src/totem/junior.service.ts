@@ -1,100 +1,68 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseAuthService } from './supabase-auth.service';
+import { scoreJuniorFeta, type JuniorTotemId } from './feta-scoring';
+import { juniorAnswersSchema, juniorAnswersEqual } from './junior-answers';
 
-type Choice = 'A' | 'B' | 'C' | 'D';
-type QuestionNumber = 1 | 2 | 3 | 4 | 5;
 type Dimension = 'F' | 'E' | 'T' | 'A';
 type Scores = Record<Dimension, number>;
 
 const juniorInputSchema = z.object({
+  checkoutSessionId: z.string().min(1).max(255),
   firstName: z.string().trim().max(40).optional(),
   locale: z.enum(['fr', 'en']).optional(),
-  answers: z.record(
-    z.string(),
-    z.object({
-      choice: z.enum(['A', 'B', 'C', 'D']),
-    }),
-  ),
+  answers: juniorAnswersSchema,
 });
 
-const dimensions: Dimension[] = ['F', 'E', 'T', 'A'];
-const questionNumbers: QuestionNumber[] = [1, 2, 3, 4, 5];
-
-const scoring: Record<QuestionNumber, Record<Choice, Scores>> = {
-  1: {
-    A: { F: 3, E: 0, T: 0, A: 1 },
-    B: { F: 0, E: 3, T: 1, A: 0 },
-    C: { F: 0, E: 1, T: 0, A: 3 },
-    D: { F: 2, E: 0, T: 0, A: 2 },
-  },
-  2: {
-    A: { F: 0, E: 1, T: 3, A: 0 },
-    B: { F: 1, E: 0, T: 1, A: 3 },
-    C: { F: 0, E: 3, T: 0, A: 1 },
-    D: { F: 2, E: 0, T: 1, A: 2 },
-  },
-  3: {
-    A: { F: 0, E: 2, T: 0, A: 2 },
-    B: { F: 1, E: 0, T: 3, A: 0 },
-    C: { F: 0, E: 0, T: 1, A: 3 },
-    D: { F: 3, E: 1, T: 0, A: 0 },
-  },
-  4: {
-    A: { F: 0, E: 2, T: 1, A: 1 },
-    B: { F: 2, E: 0, T: 2, A: 0 },
-    C: { F: 0, E: 1, T: 0, A: 3 },
-    D: { F: 3, E: 1, T: 0, A: 0 },
-  },
-  5: {
-    A: { F: 1, E: 0, T: 0, A: 3 },
-    B: { F: 3, E: 0, T: 1, A: 0 },
-    C: { F: 0, E: 0, T: 3, A: 1 },
-    D: { F: 0, E: 3, T: 0, A: 1 },
-  },
+export const JUNIOR_TOTEM_ANIMALS: Record<JuniorTotemId, string> = {
+  kwame_aigle: 'Aigle',
+  amara_lionne: 'Lionne',
+  zara_leopard: 'Léopard',
+  kemi_serpent: 'Serpent royal',
+  seun_elephant: 'Éléphant',
+  aida_panthere: 'Panthère',
+  kofi_buffle: 'Buffle',
+  nala_grue: 'Grue',
+  bakari_crocodile: 'Crocodile',
+  fatou_faucon: 'Faucon',
+  dayo_lion: 'Lion',
+  imani_tortue: 'Tortue',
 };
 
-const attribution: Record<Dimension, Record<Dimension, string>> = {
-  F: {
-    A: 'DAYO LE LION DU FEU',
-    E: 'ZARA LE LEOPARD DES OMBRES',
-    T: 'KOFI LE BUFFLE DES PLAINES',
-    F: 'AMARA LA LIONNE DES SAVANES',
-  },
-  E: {
-    A: 'KEMI LE SERPENT SAGE',
-    T: 'BAKARI LE CROCODILE ANCIEN',
-    F: 'AIDA LA PANTHERE NOIRE',
-    E: 'IMANI LA TORTUE ETERNELLE',
-  },
-  T: {
-    F: "SEUN L'ELEPHANT GARDIEN",
-    A: 'NALA LA GRUE ROYALE',
-    E: 'IMANI LA TORTUE ETERNELLE',
-    T: "SEUN L'ELEPHANT GARDIEN",
-  },
-  A: {
-    F: "KWAME L'AIGLE DES CIMES",
-    E: 'FATOU LE FAUCON LIBRE',
-    T: "KWAME L'AIGLE DES CIMES",
-    A: 'FATOU LE FAUCON LIBRE',
-  },
+const JUNIOR_TOTEM_NAMES: Record<JuniorTotemId, string> = {
+  dayo_lion: 'DAYO LE LION DU FEU',
+  zara_leopard: 'ZARA LE LÉOPARD DES OMBRES',
+  kofi_buffle: 'KOFI LE BUFFLE DES PLAINES',
+  amara_lionne: 'AMARA LA LIONNE DES SAVANES',
+  kemi_serpent: 'KEMI LE SERPENT SAGE',
+  bakari_crocodile: 'BAKARI LE CROCODILE ANCIEN',
+  aida_panthere: 'AIDA LA PANTHÈRE NOIRE',
+  imani_tortue: 'IMANI LA TORTUE ÉTERNELLE',
+  seun_elephant: "SEUN L'ÉLÉPHANT GARDIEN",
+  nala_grue: 'NALA LA GRUE ROYALE',
+  kwame_aigle: "KWAME L'AIGLE DES CIMES",
+  fatou_faucon: 'FATOU LE FAUCON LIBRE',
 };
 
 const qualities: Record<string, string> = {
   "KWAME L'AIGLE DES CIMES": 'Vision',
   'AMARA LA LIONNE DES SAVANES': 'Protection',
-  'ZARA LE LEOPARD DES OMBRES': 'Precision',
+  'ZARA LE LÉOPARD DES OMBRES': 'Précision',
   'KEMI LE SERPENT SAGE': 'Sagesse',
-  "SEUN L'ELEPHANT GARDIEN": 'Memoire',
-  'AIDA LA PANTHERE NOIRE': 'Mystere',
+  "SEUN L'ÉLÉPHANT GARDIEN": 'Mémoire',
+  'AIDA LA PANTHÈRE NOIRE': 'Mystère',
   'KOFI LE BUFFLE DES PLAINES': 'Endurance',
-  'NALA LA GRUE ROYALE': 'Grace',
-  'BAKARI LE CROCODILE ANCIEN': 'Longevite',
-  'FATOU LE FAUCON LIBRE': 'Liberte',
-  'DAYO LE LION DU FEU': 'Intensite',
-  'IMANI LA TORTUE ETERNELLE': 'Patience',
+  'NALA LA GRUE ROYALE': 'Grâce',
+  'BAKARI LE CROCODILE ANCIEN': 'Longévité',
+  'FATOU LE FAUCON LIBRE': 'Liberté',
+  'DAYO LE LION DU FEU': 'Intensité',
+  'IMANI LA TORTUE ÉTERNELLE': 'Patience',
 };
 
 @Injectable()
@@ -110,62 +78,79 @@ export class JuniorService {
       throw new BadRequestException('junior_payload_invalid');
     }
 
-    const scores = computeScores(parsed.data.answers);
+    const user = await this.auth.requireUser(authorization);
+    const order = await this.prisma.totemOrder.findFirst({
+      where: {
+        checkoutSessionId: parsed.data.checkoutSessionId,
+        userId: user.id,
+        offer: 'junior',
+      },
+    });
+    if (!order || !order.paymentIntentId) {
+      throw new ConflictException('junior_payment_not_confirmed');
+    }
+
+    const storedAnswers = juniorAnswersSchema.safeParse(order.answers);
+    if (!storedAnswers.success) {
+      throw new BadRequestException('junior_order_answers_invalid');
+    }
+    if (!juniorAnswersEqual(storedAnswers.data, parsed.data.answers)) {
+      throw new ConflictException('junior_answers_mismatch');
+    }
+
+    const scores = computeScores(storedAnswers.data);
     const { dominant, secondary, name, quality, orderNumber, phrase, share } = computeReveal(
-      scores,
+      storedAnswers.data,
       parsed.data.firstName,
     );
 
-    let userId: string | undefined;
-    if (authorization) {
-      try {
-        const user = await this.auth.requireUser(authorization);
-        userId = user.id;
+    await this.prisma.userProfile.upsert({
+      where: { id: user.id },
+      create: {
+        id: user.id,
+        role: 'junior',
+        firstName: parsed.data.firstName || undefined,
+        locale: parsed.data.locale || undefined,
+      },
+      update: {},
+    });
 
-        await this.prisma.userProfile.upsert({
-          where: { id: userId },
-          create: {
-            id: userId,
-            role: 'junior',
-            firstName: parsed.data.firstName || undefined,
-            locale: parsed.data.locale || undefined,
-          },
-          update: {},
-        });
-
-        const juniorTotem = await this.prisma.juniorTotem.create({
-          data: {
-            userId,
-            answers: parsed.data.answers as object,
-            scores,
-            dominant,
-            secondary,
-            totemName: name,
-            quality,
-            phrase,
-            orderNumber,
-          },
-        });
-
-        return {
-          id: juniorTotem.id,
-          type: 'junior',
-          firstName: parsed.data.firstName || 'Toi',
-          orderNumber,
-          scores,
-          dominant,
-          secondary,
-          totem: { name, quality },
-          phrase,
-          share,
-          saved: true,
-        };
-      } catch {
-        // Token invalid — return anonymous result
-      }
+    const existing = await this.prisma.juniorTotem.findFirst({
+      where: { userId: user.id, orderNumber },
+    });
+    if (existing) {
+      return {
+        id: existing.id,
+        type: 'junior',
+        firstName: parsed.data.firstName || 'Toi',
+        orderNumber,
+        scores: existing.scores,
+        dominant: existing.dominant,
+        secondary: existing.secondary,
+        totem: { name: existing.totemName, quality: existing.quality },
+        phrase: existing.phrase,
+        share: computeReveal(storedAnswers.data).share,
+        imageUrl: readImageUrl(order.juniorPayload),
+        saved: true,
+      };
     }
 
+    const juniorTotem = await this.prisma.juniorTotem.create({
+      data: {
+        userId: user.id,
+        answers: storedAnswers.data as object,
+        scores,
+        dominant,
+        secondary,
+        totemName: name,
+        quality,
+        phrase,
+        orderNumber,
+      },
+    });
+
     return {
+      id: juniorTotem.id,
       type: 'junior',
       firstName: parsed.data.firstName || 'Toi',
       orderNumber,
@@ -175,7 +160,8 @@ export class JuniorService {
       totem: { name, quality },
       phrase,
       share,
-      saved: false,
+      imageUrl: readImageUrl(order.juniorPayload),
+      saved: true,
     };
   }
 
@@ -223,39 +209,27 @@ export class JuniorService {
 }
 
 export function computeScores(answers: Record<string, { choice: string }>): Scores {
-  const scores: Scores = { F: 0, E: 0, T: 0, A: 0 };
-  for (const question of questionNumbers) {
-    const choice = answers[String(question)]?.choice as Choice;
-    if (!choice) throw new BadRequestException('junior_answers_incomplete');
-    const questionScores = scoring[question][choice];
-    for (const dimension of dimensions) {
-      scores[dimension] += questionScores[dimension];
-    }
-  }
-  return scores;
+  return scoreJuniorFeta(answers).scores;
 }
 
-export function computeReveal(scores: Scores, firstName?: string) {
-  const sorted = [...dimensions]
-    .map((dimension) => ({ dimension, score: scores[dimension] }))
-    .sort((left, right) => right.score - left.score);
-  const dominant = sorted[0]?.dimension ?? 'F';
-  const secondary = sorted.find((item) => item.dimension !== dominant)?.dimension ?? dominant;
-  const name = attribution[dominant][secondary] ?? attribution[dominant][dominant];
+export function computeReveal(answers: Record<string, { choice: string }>, firstName?: string) {
+  const scored = scoreJuniorFeta(answers);
+  const name = JUNIOR_TOTEM_NAMES[scored.totemId];
   const quality = qualities[name] ?? 'Presence';
-  const orderNumber = (hash(JSON.stringify(scores)) % 999999) + 1;
-  const phrase = `Avant toi, un ancetre portait ${qualityPhrase(quality)} dans son geste, et ce signe avance maintenant avec ton nom.`;
+  const orderNumber = (hash(JSON.stringify(scored.scores)) % 999999) + 1;
+    const phrase = `Avant toi, un ancêtre portait ${qualityPhrase(quality)} dans son geste, et ce signe avance maintenant avec ton nom.`;
 
   return {
-    dominant,
-    secondary,
+    totemId: scored.totemId,
+    dominant: scored.dominant,
+    secondary: scored.secondary,
     name,
     quality,
     orderNumber,
     phrase,
     share: {
       caption: `${name}\nQuel ancetre dort en toi ?\n#RevealYourTotem`,
-      messageDefi: `J'ai decouvert mon totem ancestral : ${name}. Toi, tu es quoi ? totemancestral.com`,
+      messageDefi: `J'ai découvert mon totem ancestral : ${name}. Toi, tu es quoi ? totemancestral.com`,
     },
   };
 }
@@ -264,18 +238,24 @@ function qualityPhrase(quality: string) {
   const phrases: Record<string, string> = {
     Vision: 'la vision',
     Protection: 'la protection',
-    Precision: 'la precision',
+    Précision: 'la précision',
     Sagesse: 'la sagesse',
-    Memoire: 'la memoire',
-    Mystere: 'le mystere',
+    Mémoire: 'la mémoire',
+    Mystère: 'le mystère',
     Endurance: "l'endurance",
-    Grace: 'la grace',
-    Longevite: 'la longevite',
-    Liberte: 'la liberte',
-    Intensite: "l'intensite",
+    Grâce: 'la grâce',
+    Longévité: 'la longévité',
+    Liberté: 'la liberté',
+    Intensité: "l'intensité",
     Patience: 'la patience',
   };
   return phrases[quality] ?? quality.toLowerCase();
+}
+
+function readImageUrl(payload: unknown): string | undefined {
+  if (typeof payload !== 'object' || payload === null) return undefined;
+  const imageUrl = (payload as { imageUrl?: unknown }).imageUrl;
+  return typeof imageUrl === 'string' && imageUrl.length > 0 ? imageUrl : undefined;
 }
 
 function hash(value: string) {

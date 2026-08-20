@@ -294,15 +294,9 @@ const attribution: Record<Dimension, Record<Dimension, string>> = {
 const prenomsA = [
   "Kwame",
   "Kofi",
-  "Ama",
-  "Abena",
-  "Yaw",
-  "Akua",
-  "Kojo",
-  "Adwoa",
+  "Amara",
   "Seun",
-  "Temi",
-  "Yemi",
+  "Yémi",
   "Bisi",
   "Femi",
   "Kemi",
@@ -311,71 +305,99 @@ const prenomsA = [
   "Emeka",
   "Chidi",
   "Ngozi",
-  "Amara",
   "Amani",
   "Baraka",
   "Dalila",
-  "Farida",
   "Jabari",
   "Kamau",
-  "Lulu",
   "Makena",
   "Nia",
-  "Rafiki",
   "Lomba",
-  "Maka",
   "Nkosi",
-  "Sangi",
   "Zola",
-  "Bayo",
   "Dayo",
-  "Kani",
-  "Lewa",
-  "Mora",
-];
-
-const prenomsB = [
-  "Aicha",
+  "Imani",
   "Fatou",
-  "Ibrahim",
-  "Kadija",
   "Lamine",
   "Mariama",
   "Oumar",
+  "Aïcha",
+  "Ibrahim",
+  "Kadija",
   "Rokhaya",
   "Samba",
-  "Tidiane",
-  "Ayasha",
   "Bongi",
-  "Chanda",
   "Dineo",
-  "Enoch",
   "Fumani",
-  "Gugu",
-  "Hawa",
-  "Imani",
   "Jomo",
-  "Kais",
-  "Lola",
-  "Manu",
+  "Vusi",
+  "Xola",
+];
+
+const prenomsB = [
+  "Soro",
+  "Themba",
+  "Adaeze",
+  "Kwabena",
   "Nala",
   "Oba",
-  "Pita",
-  "Rami",
-  "Soro",
-  "Tara",
+  "Sekou",
+  "Nomvula",
   "Ugo",
-  "Vusi",
   "Wata",
-  "Xola",
-  "Yara",
-  "Zara",
+  "Zawadi",
+  "Adisa",
   "Akou",
   "Baki",
   "Cela",
   "Dara",
   "Elan",
+  "Pita",
+  "Rafiki",
+  "Sangi",
+  "Maka",
+  "Lewa",
+  "Mora",
+  "Kani",
+  "Bayo",
+  "Ayasha",
+  "Chanda",
+  "Enoch",
+  "Hawa",
+  "Tidiane",
+  "Gugu",
+  "Kojo",
+  "Abena",
+  "Yaw",
+  "Akua",
+  "Adwoa",
+  "Farida",
+  "Kesi",
+  "Lulu",
+  "Wole",
 ];
+
+const prenomsAMasculins = new Set([
+  "Kwame", "Kofi", "Seun", "Yémi", "Femi", "Tobi", "Emeka", "Chidi",
+  "Baraka", "Jabari", "Kamau", "Nkosi", "Dayo", "Lamine", "Oumar", "Ibrahim",
+  "Samba", "Fumani", "Jomo", "Vusi",
+]);
+const prenomsBMasculins = new Set([
+  "Soro", "Themba", "Kwabena", "Oba", "Sekou", "Ugo", "Adisa", "Baki",
+  "Elan", "Pita", "Rafiki", "Sangi", "Mora", "Kani", "Bayo", "Enoch", "Tidiane",
+  "Kojo", "Yaw", "Wole",
+]);
+
+function namesForGender(names: readonly string[], gender: Gender, masculine: ReadonlySet<string>): string[] {
+  if (!gender) return [...names];
+  return names.filter((name) => (gender === "homme") === masculine.has(name));
+}
+
+function adaptTitleForGender(title: string, gender: Gender): string {
+  if (gender === "femme") return title.replace(/^Né\b/, "Née");
+  if (gender === "homme") return title.replace(/^Née\b/, "Né");
+  return title;
+}
 
 const titleSeries = {
   air: [
@@ -505,10 +527,19 @@ export function buildAdultV3Context(input: {
   const scored = scoreAnswers(answers);
   const archetype = scored.archetype;
   const seed = input.orderId;
+  const gender = readGender(input.answers);
   const series = titleSeries[titleSeriesByArchetype[archetype.id] ?? "universal"];
-  const prenomA = pickSeeded(prenomsA, seed, "prenom-a");
-  const prenomB = pickSeeded(prenomsB, seed, "prenom-b");
-  const title = pickSeeded(series, seed, "title");
+  const prenomA = pickSeeded(
+    namesForGender(prenomsA, gender, prenomsAMasculins),
+    seed,
+    "prenom-a",
+  );
+  const prenomB = pickSeeded(
+    namesForGender(prenomsB, gender, prenomsBMasculins),
+    seed,
+    "prenom-b",
+  );
+  const title = adaptTitleForGender(pickSeeded(series, seed, "title"), gender);
   const context: Omit<AdultV3Context, "imagePrompt"> = {
     firstName: input.customerName?.trim() || "Voyageur",
     language,
@@ -517,7 +548,7 @@ export function buildAdultV3Context(input: {
     season: getSeason(now, language),
     hour: getHourPeriod(now, language),
     answers,
-    gender: readGender(input.answers),
+    gender,
     scores: scored.scores,
     dominant: scored.dominant,
     secondary: scored.secondary,
@@ -574,12 +605,14 @@ MISSION :
 5. A5 : produire les textes de partage LinkedIn/Instagram, WhatsApp et message Clan.
 
 REGLES STRICTES :
-- Ne jamais presenter l'oeuvre comme une verite ethnique ou scientifique.
+- Ne jamais presenter l'oeuvre comme une verite ethnique, historique ou scientifique. C'est une fable artistique, non une genealogie, une divination ou une preuve.
 - Conditionnel doux pour l'ancetre : "il aurait vecu", jamais "tu es" pour l'ancetre.
 - ADRESSE AU CLIENT : lorsque l'ancetre parle a ${context.firstName}, il l'appelle « Cher Fils ${context.firstName} » ou « Chere Fille ${context.firstName} » selon le genre declare plus haut, jamais une formule neutre. Le meme genre commande l'accord du recit sur l'ancetre : les deux sont identiques.
-- Pas d'emojis, pas de texte marketing dans le parchemin, pas de cliches.
+- Pas d'emojis, pas de texte marketing, pas de cliches, pas de nom de divinite, de priere, de rituel ou de formule sacree.
+- Ecris une prose francaise relue : accords, orthographe, ponctuation, enchainements logiques et vocabulaire precis. Le texte doit rester humain, sobre et singulier, sans marqueur de generation automatique.
 - PONCTUATION : n'utilise JAMAIS de tiret (-) ni de tiret cadratin (—) pour separer des mots, des idees ou des phrases, ni comme incise, ni devant un numero. Emploie uniquement une ponctuation francaise correcte : virgule, point, deux-points, point-virgule, parentheses. Le tiret n'est admis qu'a l'interieur d'un mot compose (« sous-bois », « au-dela »).
-- Image : portrait ancestral puissant, visage coupe en deux, moitie gauche visage realiste du totem, moitie droite masque Ngil Fang stylise, cadrage vertical 3:4, portrait rapproche centre, en langage naturel sans parametres techniques.
+- Image : masque Ngil Fang sculpte en bois, seul sujet de l'image, objet d'art premium et imprimable. Ses volumes et ornements evoquent exclusivement l'animal totem impose, sans representer d'animal vivant. Matiere rude et patinee, mais noble, glamour, splendide et majestueuse, palette noir profond, or ancestral, ocre, indigo et ivoire, cadrage vertical 3:4, en langage naturel sans parametres techniques.
+- Interdiction absolue pour l'image : humain, visage humain, portrait humain, silhouette humaine, corps humain, corps animal, moitie de visage, collage ou sujet vivant.
 
 REPONSE JSON STRICTE, sans Markdown ni texte avant/apres :
 {
@@ -634,7 +667,8 @@ export function normalizeAdultV3Response(
   const a3 = readRecord(root.a3) ?? root;
   const a4 = readRecord(root.a4) ?? root;
   const a5 = readRecord(root.a5) ?? {};
-  const ancestralName = readString(a1.nom_complet) || context.nomComplet;
+  const candidateName = readString(a1.nom_complet);
+  const ancestralName = isCanonicalTotemName(candidateName) ? candidateName : context.nomComplet;
   const parchmentText = readString(a2.parchment_text) || buildFallbackParchment(context);
   const audioMessage = readString(a3.audio_script) || buildAudioFallback(context, parchmentText);
   const imagePrompt =
@@ -642,7 +676,7 @@ export function normalizeAdultV3Response(
   const storyPages = buildStoryPagesFromMovements(a2, parchmentText, imagePrompt);
 
   return {
-    archetypeId: readString(a1.archetype) || context.archetype.id,
+    archetypeId: context.archetype.id,
     ancestralName,
     parchmentText,
     audioMessage,
@@ -667,6 +701,10 @@ export function normalizeAdultV3Response(
 
 export function buildAdultV3FallbackPayload(context: AdultV3Context): TotemTextPayload {
   return normalizeAdultV3Response({}, context);
+}
+
+function isCanonicalTotemName(value: string): boolean {
+  return /^[^,\s]+-[^,\s]+,\s*[^,]+$/.test(value.trim());
 }
 
 function parseAnswers(answers: QuestionnaireAnswer[]): Record<string, ParsedAnswer> {
@@ -739,52 +777,21 @@ function scoreAnswers(answers: Record<string, ParsedAnswer>) {
 function buildV3ImagePrompt(context: Omit<AdultV3Context, "imagePrompt">): string {
   const frame = visualFrameDescription(context.visualFrame);
   const keywords = personalityKeywords(context.answers).join(", ");
-  const leftFace = animalLeftFace(context.archetype.id);
-
-  // Direction photographique : on cherche une vraie photographie de studio,
-  // pas un rendu 3D. Aucun terme du registre « IA » (8k, hyperdetaille,
-  // artstation...) qui tire l'image vers le lisse et le synthetique.
-  const person =
-    context.gender === "homme"
-      ? "un homme"
-      : context.gender === "femme"
-        ? "une femme"
-        : "une personne";
+  const animal = context.archetype.french;
 
   return [
-    `Photographie de portrait documentaire, ${person}, visage coupe en deux`,
-    `moitie gauche ${leftFace}`,
-    "moitie droite un veritable masque Ngil Fang en bois sculpte, pigment kaolin blanc use, patine et traces d'outil visibles",
-    "transition organique au milieu du visage, sans contour net ni effet de collage",
-    "cicatrices rituelles dorees discretes, en relief sur la peau",
-    "peau reelle : pores visibles, grain, legere asymetrie, imperfections naturelles, aucune retouche",
-    "lumiere naturelle unique et laterale, ombres douces, contraste profond mais non sature",
-    "prise de vue moyen format, objectif 85mm, f/2.8, faible profondeur de champ, grain argentique fin",
-    keywords ? `traits de caractere a rendre par la posture et le regard : ${keywords}` : "",
+    `Masque Ngil Fang sculpte en bois, seul sujet de l'image, objet d'art premium qui evoque le ${animal} par ses volumes et ses ornements, sans representer d'animal vivant`,
+    "forme allongee et expressive, sculpture rude et ancestrale mais jamais repoussante, noble, majestueuse, glamour, splendide et precieuse",
+    "kaolin ivoire patine, grain naturel du bois, traces d'outil visibles, accents d'or ancestral, ocre et indigo sur noir profond",
+    "nature morte d'atelier museal, socle sombre, lumiere dramatique controlee, composition verticale 3:4",
+    keywords ? `atmosphere inspired by these qualities: ${keywords}` : "",
     `composition: ${frame}`,
-    "cadrage vertical 3:4, sans texte, sans logo, sans watermark",
+    "aucun etre humain, aucun visage humain, aucun portrait, aucune silhouette humaine, aucun corps, aucun torse, aucun buste, aucun corps animal, aucune moitie de visage, aucun collage, aucun sujet vivant, aucun texte, aucun logo, aucun watermark",
   ]
     .filter(Boolean)
     .join(", ");
 }
 
-function animalLeftFace(archetypeId: string): string {
-  const labels: Record<string, string> = {
-    lion: "visage de lion realiste avec criniere noire et regard percant",
-    lionne: "visage de lionne realiste avec regard protecteur et traits royaux",
-    rhinoceros: "visage de rhinoceros realiste avec corne sculpturale et peau minerale",
-    crocodile: "visage de crocodile realiste avec ecailles profondes et regard ancien",
-    serpent: "visage de serpent realiste avec ecailles vert sombre et regard hypnotique",
-    dauphin: "visage de dauphin realiste avec peau bleutee et regard lumineux",
-    elephant: "visage d'elephant realiste avec defenses sculpturales et regard ancestral",
-    baobab: "visage anthropomorphe de baobab realiste avec ecorce massive et racines sculptees",
-    zebre: "visage de zebre realiste avec rayures nettes et regard calme",
-    perroquet: "visage de perroquet realiste avec plumage vert et or et regard vif",
-    aigle: "visage d'aigle realiste avec bec royal et regard percant",
-    leopard: "visage de leopard realiste avec taches sombres et regard precis",
-  };
-  return labels[archetypeId] ?? `visage realiste du totem ${archetypeId}`;
-}
 
 function buildStoryPagesFromMovements(
   a2: Record<string, unknown>,

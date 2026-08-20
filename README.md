@@ -1,18 +1,35 @@
 # TOTEM Orchestrator - Backend NestJS
 
-Backend de production de TOTEM Ancestral. Il gere Stripe, la queue BullMQ, la generation IA, le stockage Supabase Storage, la livraison email et le miroir des resultats vers les tables Supabase consommees par le frontend Next.js.
+Backend de production de TOTEM Ancestral. Il gere Stripe, une file Redis crash-safe (Upstash REST), la generation IA, le stockage Supabase Storage, la livraison email et le miroir des resultats vers les tables Supabase consommees par le frontend Next.js.
 
 ## Stack
 
 - NestJS 11, TypeScript, Express.
 - Prisma 6 sur Postgres Supabase.
-- BullMQ + Redis/Upstash pour la queue de generation.
-- Stripe Checkout + webhooks.
+- File Redis Upstash REST (`@upstash/redis`) : LPUSH + LMOVE vers `processing` + ACK apres persist. Pas de BullMQ (Upstash n'expose pas le protocole Redis TCP).
+- Stripe Checkout + webhooks (`stripe` v20, aligne sur le frontend).
 - Anthropic pour la generation editoriale.
 - OpenAI Images et TTS pour les visuels et l'audio.
 - pdf-lib pour le parchemin PDF multi-page.
 - Supabase Storage pour les artefacts prives.
 - Resend pour les emails de livraison et alertes.
+
+## Catalogue (source de verite)
+
+`src/totem/prices.ts` — identique a `totem-project/src/lib/offers.ts` :
+
+| Offre      | Centimes | EUR    |
+| ---------- | -------- | ------ |
+| origine    | 4900     | 49 €   |
+| ancestral  | 9900     | 99 €   |
+| famille    | 21900    | 219 €  |
+| junior     | 999      | 9,99 € |
+
+Les variables `TOTEM_PRICE_*_CENTS` peuvent surcharger, mais `render.yaml` / `.env.example` doivent rester ces constantes.
+
+## Scoring FETA
+
+Copie de `totem-project/src/lib/feta-scoring.ts` dans `src/totem/feta-scoring.ts`. Toute evolution doit etre reportee des deux cotes (vecteurs golden alignes, avec des tests adaptes a chaque API).
 
 ## Responsabilites
 
@@ -28,13 +45,16 @@ Backend de production de TOTEM Ancestral. Il gere Stripe, la queue BullMQ, la ge
 
 ```text
 src/main.ts                         Bootstrap Nest
-src/app.module.ts                   Config globale + BullMQ Redis
+src/app.module.ts                   Config globale
 src/config/env.schema.ts            Validation des variables d'environnement
 src/health.controller.ts            Healthchecks Render
 src/prisma/                         PrismaService et module
-src/totem/checkout.*                Creation Stripe Checkout
+src/totem/checkout.*                Creation Stripe Checkout (adultes + junior)
+src/totem/prices.ts                 Catalogue prix (aligne sur le frontend)
+src/totem/feta-scoring.ts           Scoring FETA (copie du frontend)
 src/totem/stripe-webhook.*          Verification et traitement webhooks Stripe
-src/totem/totem.worker.ts           Worker BullMQ du pipeline de generation
+src/totem/totem-queue.service.ts    File Redis crash-safe (LMOVE/ACK)
+src/totem/totem.worker.ts           Worker de polling du pipeline
 src/totem/totem-ai.service.ts       Anthropic, OpenAI image/TTS, PDF
 src/totem/supabase-storage.service.ts Stockage et signature des artefacts
 src/totem/supabase-mirror.service.ts  Miroir vers tables Supabase frontend
@@ -46,7 +66,7 @@ Dockerfile                          Image de production
 
 ## Installation locale
 
-Prerequis: Node.js 20+, npm, Postgres/Supabase, Redis, cles Anthropic/OpenAI.
+Prerequis: Node.js 20+, npm, Postgres/Supabase, Upstash Redis REST, cles Anthropic/OpenAI.
 
 ```bash
 npm install
@@ -81,7 +101,8 @@ Variables critiques:
 PUBLIC_ASSET_BASE_URL=
 CORS_ORIGIN=
 DATABASE_URL=
-REDIS_URL=
+UPSTASH_REDIS_URL=
+UPSTASH_REDIS_TOKEN=
 TOTEM_WORKER_CONCURRENCY=2
 TOTEM_STORY_PAGE_COUNT=20
 TOTEM_IMAGE_GENERATION_CONCURRENCY=2
@@ -107,13 +128,13 @@ Notes:
 
 - `PUBLIC_ASSET_BASE_URL` doit etre l'URL publique du backend, sans slash final.
 - `DATABASE_URL` doit utiliser le pooler Supabase IPv4 en production si l'hebergeur ne supporte pas IPv6.
-- `REDIS_URL` doit utiliser `rediss://` avec Upstash TLS.
-- `TOTEM_WORKER_CONCURRENCY` reste bas car une commande genere deux images IA et un audio long.
+- `UPSTASH_REDIS_URL` + `UPSTASH_REDIS_TOKEN` : client HTTP Upstash (pas `rediss://`).
+- `TOTEM_WORKER_CONCURRENCY` reste bas car une commande genere deux images IA et un audio long. Un seul replica Render : le reclaim au boot reprend les jobs `processing`.
 - `OPENAI_IMAGE_MODEL` est `gpt-image-2` pour les visuels sculpture/artefact.
 
 ## Pipeline de generation
 
-Le pipeline est lance par un job BullMQ dans `TotemWorker`.
+Le pipeline est lance par un job Redis (polling 3s) dans `TotemWorker`. La file deplace atomiquement `queue` -> `processing` (LMOVE) ; l'ACK n'a lieu qu'apres persist. Au boot, les jobs `processing` sont repris.
 
 1. Lire la commande `TotemOrder`.
 2. Marquer la commande `processing` et miroir Supabase `en_generation`.
@@ -146,7 +167,8 @@ Chaque page conserve son univers narratif propre, mais le meme animal totem rest
 
 ## Endpoints
 
-- `POST /checkout`: cree une session Stripe Checkout.
+- `POST /checkout`: cree une session Stripe Checkout (`origine` | `ancestral` | `famille` | `junior`).
+- `GET /orders/session/:id`: commande payee de l'utilisateur (revelation Junior apres paiement).
 - `POST /webhooks/stripe`: traite les webhooks Stripe.
 - `GET /totem-assets/:token`: sert un artefact prive signe en telechargement.
 - `GET /health/live`: healthcheck simple.
@@ -212,6 +234,7 @@ OPENAI_IMAGE_MODEL=gpt-image-2
 
 ```bash
 npm run typecheck
+npm test
 npm run build
 ```
 

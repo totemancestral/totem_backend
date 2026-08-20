@@ -21,6 +21,8 @@ export type CheckoutMetadata = {
   checkoutSessionId?: string;
   externalCommandId?: string;
   answers: QuestionnaireAnswer[];
+  questionnaireVersion?: string;
+  indicators?: Record<string, boolean>;
 };
 
 export type TotemTextPayload = {

@@ -25,9 +25,7 @@ services:
       - key: TOTEM_WORKER_CONCURRENCY
         value: 2
       - key: TOTEM_STORY_PAGE_COUNT
-        value: 20
-      - key: TOTEM_IMAGE_GENERATION_CONCURRENCY
-        value: 2
+        value: 5
       - key: STRIPE_SECRET_KEY
         sync: false
       - key: STRIPE_WEBHOOK_SECRET
@@ -39,9 +37,11 @@ services:
       - key: TOTEM_PRICE_ORIGINE_CENTS
         value: 4900
       - key: TOTEM_PRICE_ANCESTRAL_CENTS
-        value: 8900
+        value: 9900
       - key: TOTEM_PRICE_FAMILLE_CENTS
-        value: 19900
+        value: 21900
+      - key: TOTEM_PRICE_JUNIOR_CENTS
+        value: 999
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: ANTHROPIC_MODEL
@@ -66,9 +66,9 @@ services:
         sync: false
       - key: RESEND_API_KEY
         sync: false
-      - key: RESEND_SENDER_EMAIL
+      - key: RESEND_FROM_EMAIL
         sync: false
-      - key: RESEND_SENDER_NAME
+      - key: RESEND_FROM_NAME
         value: TOTEM ANCESTRAL
       - key: ALERT_EMAIL
         sync: false

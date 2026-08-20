@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Post } from "@nestjs/common";
+import { Body, Controller, Get, Headers, Param, Post } from "@nestjs/common";
 import { SupabaseAuthService } from "./supabase-auth.service";
 import { TotemOrdersService } from "./totem-orders.service";
 
@@ -8,6 +8,18 @@ export class TotemOrdersController {
     private readonly orders: TotemOrdersService,
     private readonly auth: SupabaseAuthService,
   ) {}
+
+  @Get("session/:checkoutSessionId")
+  async bySession(
+    @Param("checkoutSessionId") checkoutSessionId: string,
+    @Headers("authorization") authorization?: string,
+  ) {
+    const user = await this.auth.requireUser(authorization);
+    return this.orders.getByCheckoutSession({
+      checkoutSessionId,
+      userId: user.id,
+    });
+  }
 
   @Post("complete")
   async complete(@Body() body: unknown, @Headers("authorization") authorization?: string) {

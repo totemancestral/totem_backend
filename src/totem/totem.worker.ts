@@ -7,7 +7,8 @@ import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { SupabaseStorageService } from "./supabase-storage.service";
 import { TotemAiService } from "./totem-ai.service";
 import { TotemQueueService } from "./totem-queue.service";
-import { QuestionnaireAnswer } from "./totem.types";
+import { extractAdultAnswers } from "./adult-answers";
+import { TOTEM_ANIMALS } from "./totem-animals";
 
 @Injectable()
 export class TotemWorker implements OnModuleInit, OnModuleDestroy {
@@ -36,7 +37,14 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
 
   onModuleInit(): void {
     this.running = true;
-    this.timer = setInterval(() => this.poll(), this.pollIntervalMs);
+    void this.queue.reclaimStale(0).catch((error) => {
+      this.logger.error(`queue reclaim failed: ${error instanceof Error ? error.message : error}`);
+    });
+    this.timer = setInterval(() => {
+      void this.poll().catch((error) => {
+        this.logger.error(`queue poll failed: ${error instanceof Error ? error.message : error}`);
+      });
+    }, this.pollIntervalMs);
   }
 
   onModuleDestroy(): void {
@@ -51,7 +59,12 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
     if (!this.running || this.activeJobs >= this.concurrency) return;
 
     const orderId = await this.queue.dequeue();
-    if (!orderId) return;
+    if (!orderId) {
+      void this.queue.reclaimStale().catch((error) => {
+        this.logger.error(`queue reclaim failed: ${error instanceof Error ? error.message : error}`);
+      });
+      return;
+    }
 
     this.activeJobs += 1;
     this.process(orderId)
@@ -62,17 +75,19 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
   }
 
   private async process(orderId: string): Promise<void> {
-    await this.queue.markActive(orderId);
-
     try {
       const order = await this.prisma.totemOrder.findUniqueOrThrow({
         where: { id: orderId },
       });
 
       if (order.status === TotemOrderStatus.done) {
+        if (order.offer === "junior") return;
         await this.sendDeliveryIfNeeded(order);
         return;
       }
+
+      // Les commandes Junior sont revelees par le webhook paye, pas par le pipeline adulte.
+      if (order.offer === "junior") return;
 
       await this.prisma.totemOrder.update({
         where: { id: order.id },
@@ -85,7 +100,8 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
       });
       await this.mirror.markProcessing(order);
 
-      const answers = order.answers as unknown as QuestionnaireAnswer[];
+      const answers = extractAdultAnswers(order.answers);
+      if (!answers) throw new Error("adult_answers_incomplete");
       const text = await this.generation.generateText({
         orderId: order.id,
         userId: order.userId,
@@ -107,6 +123,9 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
         orderId: order.id,
         archetypeId: text.archetypeId,
         prompt: text.imagePrompt,
+        animalName:
+          TOTEM_ANIMALS.find((animal) => animal.slug === text.archetypeId)?.name ??
+          text.archetypeId,
       });
       const image = await this.storage.store(order.id, "image", imageArtefact);
 
@@ -156,7 +175,7 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       await this.registerFailure(orderId, error);
     } finally {
-      await this.queue.markDone(orderId);
+      await this.queue.ack(orderId);
     }
   }
 

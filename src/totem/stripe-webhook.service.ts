@@ -9,6 +9,8 @@ import { Prisma, TotemOrderStatus } from "@prisma/client";
 import Stripe from "stripe";
 import { PrismaService } from "../prisma/prisma.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
+import { SupabaseStorageService } from "./supabase-storage.service";
+import { TotemAiService } from "./totem-ai.service";
 import { TotemQueueService } from "./totem-queue.service";
 import {
   CheckoutSessionPayload,
@@ -18,7 +20,9 @@ import {
   parseCheckoutMetadata,
 } from "./totem.schemas";
 import { CheckoutMetadata } from "./totem.types";
-import { computeScores, computeReveal } from "./junior.service";
+import { computeScores, computeReveal, JUNIOR_TOTEM_ANIMALS } from "./junior.service";
+import { isCompleteAdultAnswers } from "./adult-answers";
+import { isCompleteJuniorAnswers } from "./junior-answers";
 
 @Injectable()
 export class StripeWebhookService {
@@ -31,6 +35,8 @@ export class StripeWebhookService {
     private readonly prisma: PrismaService,
     private readonly queue: TotemQueueService,
     private readonly mirror: SupabaseMirrorService,
+    private readonly generation: TotemAiService,
+    private readonly storage: SupabaseStorageService,
   ) {
     this.stripeSecretKey = config.get<string>("STRIPE_SECRET_KEY");
     this.webhookSecret = config.get<string>("STRIPE_WEBHOOK_SECRET");
@@ -357,6 +363,7 @@ export class StripeWebhookService {
     const order = await this.prisma.totemOrder.findUniqueOrThrow({ where: { id: orderId } });
 
     if (order.status !== TotemOrderStatus.pending || order.queuedAt) return;
+    if (order.offer === "junior") return;
     if (!hasEnoughAnswersForGeneration(order.answers, order.offer)) return;
 
     await this.queue.enqueue(order.id);
@@ -369,49 +376,77 @@ export class StripeWebhookService {
 
   private async computeJuniorRevealIfNeeded(orderId: string): Promise<void> {
     const order = await this.prisma.totemOrder.findUnique({ where: { id: orderId } });
-    if (!order || order.offer !== "junior") return;
-    if (order.juniorPayload) return;
+    if (!order || order.offer !== "junior" || order.juniorPayload || !order.paymentIntentId) return;
 
-    const answers = order.answers as Record<string, { choice: string }> | null;
-    if (!answers) return;
+    const claimed = await this.prisma.totemOrder.updateMany({
+      where: {
+        id: orderId,
+        offer: "junior",
+        status: TotemOrderStatus.pending,
+        paymentIntentId: { not: null },
+        juniorPayload: { equals: Prisma.JsonNull },
+      },
+      data: { status: TotemOrderStatus.processing, processingAt: new Date() },
+    });
+    if (claimed.count === 0) return;
 
-    try {
-      const scores = computeScores(answers);
-      const reveal = computeReveal(scores);
+    const answers = order.answers as unknown;
+    if (!isCompleteJuniorAnswers(answers)) {
       await this.prisma.totemOrder.update({
         where: { id: orderId },
-        data: {
-          juniorPayload: {
-            scores,
-            dominant: reveal.dominant,
-            secondary: reveal.secondary,
-            totemName: reveal.name,
-            quality: reveal.quality,
-            orderNumber: reveal.orderNumber,
-            phrase: reveal.phrase,
-            share: reveal.share,
-          },
-        },
+        data: { status: TotemOrderStatus.error, errorMessage: "junior_answers_incomplete" },
       });
-    } catch {
-      // Non bloquant — le reveal sera calculé plus tard
+      throw new BadRequestException("junior_answers_incomplete");
     }
+
+    const scores = computeScores(answers);
+    const reveal = computeReveal(answers);
+    const imageArtefact = await this.generation.generateImage({
+      orderId,
+      archetypeId: reveal.totemId,
+      animalName: JUNIOR_TOTEM_ANIMALS[reveal.totemId],
+      prompt: `Create a Junior TOTEM ancestral artwork for ${reveal.name}. The totem animal is ${JUNIOR_TOTEM_ANIMALS[reveal.totemId]}.`,
+    });
+    const image = await this.storage.store(orderId, "image", imageArtefact);
+
+    await this.prisma.totemOrder.update({
+      where: { id: orderId },
+      data: {
+        status: TotemOrderStatus.done,
+        juniorPayload: {
+          firstName: order.customerName ?? "Toi",
+          scores,
+          dominant: reveal.dominant,
+          secondary: reveal.secondary,
+          totemId: reveal.totemId,
+          totemName: reveal.name,
+          quality: reveal.quality,
+          orderNumber: reveal.orderNumber,
+          phrase: reveal.phrase,
+          share: reveal.share,
+          imageKey: image.key,
+          imageUrl: image.url,
+        },
+        imageKey: image.key,
+        imageUrl: image.url,
+        completedAt: new Date(),
+        errorMessage: null,
+      },
+    });
   }
 }
 
 export function hasEnoughAnswersForGeneration(value: Prisma.JsonValue, offer?: string): boolean {
-  const minAnswers = offer === "junior" ? 5 : 10;
-  if (Array.isArray(value)) {
-    const answers = value.filter(
-      (answer) => isRecord(answer) && typeof answer.answer === "string" && answer.answer.trim(),
-    );
-    return answers.length >= minAnswers;
+  if (offer === "junior") {
+    if (Array.isArray(value)) {
+      return value.filter(
+        (answer) => isRecord(answer) && typeof answer.answer === "string" && answer.answer.trim(),
+      ).length >= 5;
+    }
+    return isRecord(value) && Object.keys(value).length >= 5;
   }
-  if (isRecord(value)) {
-    const keys = Object.keys(value);
-    return keys.length >= minAnswers;
-  }
-  return false;
+
+  return isCompleteAdultAnswers(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

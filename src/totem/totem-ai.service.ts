@@ -41,6 +41,7 @@ type ImageRequest = {
   orderId: string;
   archetypeId: string;
   prompt: string;
+  animalName?: string;
 };
 
 type AudioRequest = {
@@ -165,7 +166,7 @@ export class TotemAiService {
         },
         body: JSON.stringify({
           model: this.openAiImageModel,
-          prompt: buildNgilMaskTotemPrompt(payload.prompt, payload.archetypeId),
+          prompt: buildNgilMaskTotemPrompt(payload.prompt, payload.archetypeId, payload.animalName),
           size: "1024x1360",
           quality: "medium",
           n: 1,
@@ -215,7 +216,7 @@ export class TotemAiService {
             voice: this.openAiTtsVoice,
             input: chunks[index],
             instructions:
-              "Voix grave, lente et voilee, comme un ancetre revenu des profondeurs. Diction rituelle, souffle ancien, emotion contenue, pauses marquees entre les images fortes.",
+              "Voix grave, lente, chaleureuse et posée. Diction nette, articulation soignée, prononciation française naturelle, respirations courtes et pauses marquées après les phrases fortes. Laisser le silence porter le sens sans emphase ni effet théâtral.",
             response_format: "mp3",
           }),
         },
@@ -287,7 +288,8 @@ Reponds uniquement avec un objet JSON valide, sans Markdown, sans commentaire, a
 
 Contraintes :
 - Langue de sortie : ${language}.
-- Ton : plume de griot, mystique, intime, noble, jamais caricatural.
+- Ton : plume de griot, intime et noble, jamais caricatural, religieux ou divinatoire.
+- Ecris une prose relue : accords, orthographe, ponctuation, enchainements logiques et vocabulaire precis. Le texte doit rester humain, sobre et singulier, sans marqueur de generation automatique.
 - Liste autorisee des archetypes : ${allowedTotemAnimalNames()}.
 - L'archetype central obligatoire est : ${animalName}. Tu ne dois choisir aucun autre animal central.
 - Peuple inspirant : ${people} (${region}). Qualite principale : ${quality}.
@@ -299,10 +301,10 @@ Contraintes :
 - PONCTUATION : n'utilise JAMAIS de tiret (-) ni de tiret cadratin (—) pour separer des mots, des idees ou des phrases, ni comme incise, ni devant un numero. Emploie uniquement une ponctuation francaise correcte : virgule, point, deux-points, point-virgule, parentheses. Le tiret n'est admis qu'a l'interieur d'un mot compose (« sous-bois », « au-dela »).
 - storyPages : exactement ${storyPageCount} objets, numerotes de 1 a ${storyPageCount}, reprenant les mouvements du parchemin.
 - Si ${storyPageCount} > 5, les pages supplementaires prolongent le meme recit sans changer d'archetype.
-- Chaque storyPages[i].imagePrompt : meme totem sous forme de portrait ancestral coupe en deux, moitie gauche visage realiste de l'animal totem, moitie droite masque Ngil Fang stylise, sans typographie ni mot visible.
+- Chaque storyPages[i].imagePrompt : le meme masque Ngil ancestral, objet d'art autonome, dont les ornements evoquent l'animal totem ${animalName}. Aucun etre vivant ni sujet humain.
 - audioMessage : 130 a 160 mots, phrases courtes, pauses avec "..." ou retours ligne, ton pose, grave et doux.
-- imagePrompt : prompt descriptif en langage naturel (pas de parametres --ar/--stylize/--v), format visuel : Portrait ancestral puissant, visage coupe en deux : moitie gauche visage realiste de ${animalName}, moitie droite masque Ngil Fang traditionnel africain stylise avec yeux blancs et motifs geometriques, fusion harmonieuse au milieu du visage, peau avec cicatrices rituelles dorees, ambiance sombre mystique, eclairage dramatique cinematographique, style artistique premium africain, tres detaille, haute resolution, cadrage vertical 3:4.
-- Interdits : texte visible dans l'image, logos, watermark, verite scientifique ou ethnique, divination, emojis.`;
+- imagePrompt : prompt descriptif en langage naturel (pas de parametres --ar/--stylize/--v), consacre a un masque Ngil Fang sculpte en bois, seul sujet de l'image. Le masque porte des motifs et volumes qui evoquent ${animalName}, avec une presence noble, majestueuse, glamour et precieuse, rude dans sa matiere mais jamais repoussante, palette noir profond, or ancestral, ocre, indigo et ivoire, traces d'outil, kaolin patine, eclairage d'atelier museal, cadrage vertical 3:4.
+- Interdits absolus : visage humain, portrait humain, personne, silhouette humaine, corps humain, moitie de visage, collage, texte visible, logos, watermark, verite scientifique ou ethnique, divination, emojis.`;
 }
 
 function buildTextUserPrompt(payload: TextRequest, selectedAnimal: TotemAnimal): string {
@@ -373,28 +375,27 @@ function ensureStoryPages(text: TotemTextPayload, minimumCount: number): TotemSt
 }
 
 function buildAudioNarration(text: TotemTextPayload, minimumCount: number): string {
-  return text.audioMessage.trim() || text.parchmentText.slice(0, 1400);
+    const source = text.audioMessage.trim() || text.parchmentText.trim();
+  if (!source) return "";
+  return source;
 }
 
 
 
-function buildNgilMaskTotemPrompt(prompt: string, archetypeId: string): string {
-  const leftFace = animalLeftFace(archetypeId);
+function buildNgilMaskTotemPrompt(prompt: string, archetypeId: string, animalName?: string): string {
+  const animal = animalName ?? animalNameForPrompt(archetypeId);
+  const source = /human|person|portrait|face|split[- ]face|animal body|living subject|personne|visage|portrait|corps humain|corps animal|moitié/i.test(prompt)
+    ? ""
+    : prompt.trim();
 
-  // Le rendu doit passer pour une photographie prise en studio, pas pour une
-  // image generee : d'ou une direction strictement photographique (appareil,
-  // optique, lumiere, matiere de peau) et un negatif qui exclut explicitement
-  // les signatures du rendu synthetique.
   return [
-    prompt,
-    `Mandatory subject: a real photographic portrait of one person, face split in two — left half ${leftFace}, right half an authentic hand-carved Fang Ngil wooden mask with aged white kaolin pigment, visible tool marks, worn patina and real wood grain.`,
-    "Organic transition down the middle of the face: skin meets wood with no hard seam, no cut-out or collage effect.",
-    "Real skin: visible pores, fine hair, natural texture and slight asymmetry, subtle blemishes, no retouching, no smoothing.",
-    "Lighting: one natural side light source with soft falloff, deep but unsaturated shadows, no rim glow, no lens flare, no artificial halo.",
-    "Camera: medium format, 85mm lens at f/2.8, shallow depth of field, natural colour depth, fine analog grain.",
-    "Palette: deep black #0D0D1A, ancestral gold #C9A84C, ochre, indigo, ivory. Vertical 3:4 close-up framing.",
-    "Avoid absolutely: 3D render, CGI, digital painting, illustration, concept art, airbrushed or waxy plastic skin, glossy highlights, oversaturation, HDR halo, perfect symmetry, over-sharpening, glowing eyes, beauty-filter look.",
-    "Do not generate text, letters, logos, watermark, labels, UI, modern objects or cartoon style.",
+    source,
+    `Mandatory subject: one authentic hand-carved Fang Ngil wooden mask, the only subject in the image. Its sculpted geometry, elongated form and restrained ornaments evoke the ${animal} totem without depicting an animal body. This is a finished visual artwork, not a portrait or a scene.`,
+    "Museum-grade art object, noble, majestic, glamorous and precious, with a rugged ancestral material quality that remains elegant and never grotesque.",
+    "Aged ivory kaolin pigment, deep natural wood grain, visible hand tools, subtle ochre and indigo accents, restrained ancestral gold details, rich black shadows.",
+    "Studio still life on a simple dark pedestal, frontal or slightly three-quarter view, controlled dramatic light, soft falloff, fine material detail, vertical 3:4 composition.",
+    "No human being, no human face, no human portrait, no human silhouette, no body, no torso, no bust, no animal body, no split face, no collage, no living subject.",
+    "Avoid CGI, plastic surfaces, cartoon style, grotesque distortion, excessive symmetry, glowing eyes, text, letters, logos, watermark, labels, UI or modern objects.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -415,41 +416,27 @@ function fallbackScenePrompt(text: TotemTextPayload, page: number): string {
   ];
   const realm = realms[(page - 1) % realms.length];
 
-  return `Illustrate page ${page} of a long ancestral story: the same totem ${text.ancestralName} appears as a split-face Ngil ancestral portrait in ${realm}, left half realistic animal face, right half stylized Fang Ngil mask, golden ritual scarifications, dramatic cinematic light, premium African artwork, no text, no typography.`;
+  return `Illustrate page ${page} with the same hand-carved Fang Ngil wooden mask, the only subject, displayed as a precious ancestral art object in ${realm}. Its ornaments evoke the totem without depicting any living being. Noble, majestic, glamorous, rugged wood, aged ivory kaolin, ancestral gold, ochre and indigo, dramatic museum light, vertical composition, no human, no animal body, no text, no typography.`;
 }
 
-function animalLeftFace(archetypeId: string): string {
-  const labels: Record<string, string> = {
-    lion: "visage de lion realiste avec criniere noire et regard percant",
-    lionne: "visage de lionne realiste avec regard protecteur et traits royaux",
-    rhinoceros: "visage de rhinoceros realiste avec corne sculpturale et peau minerale",
-    crocodile: "visage de crocodile realiste avec ecailles profondes et regard ancien",
-    serpent: "visage de serpent realiste avec ecailles vert sombre et regard hypnotique",
-    dauphin: "visage de dauphin realiste avec peau bleutee et regard lumineux",
-    elephant: "visage d'elephant realiste avec defenses sculpturales et regard ancestral",
-    baobab: "visage anthropomorphe de baobab realiste avec ecorce massive et racines sculptees",
-    zebre: "visage de zebre realiste avec rayures nettes et regard calme",
-    perroquet: "visage de perroquet realiste avec plumage vert et or et regard vif",
-    aigle: "visage d'aigle realiste avec bec royal et regard percant",
-    leopard: "visage de leopard realiste avec taches sombres et regard precis",
-    python: "visage de python realiste avec ecailles profondes et regard ancien",
-    panthere: "visage de panthere noire realiste avec regard precis et silhouette d'ombre",
-    guepard: "visage de guepard realiste avec marques lacrymales et regard rapide",
-    hyene: "visage de hyene realiste avec machoire puissante et regard inquietant",
-    buffle: "visage de buffle realiste avec cornes massives et regard ancre",
-    hippopotame: "visage d'hippopotame realiste avec peau sombre et puissance tranquille",
-    girafe: "visage de girafe realiste avec motifs ocres et regard eleve",
-    gorille: "visage de gorille realiste avec front puissant et regard profond",
-    chimpanze: "visage de chimpanze realiste avec regard vif et intelligence calme",
-    faucon: "visage de faucon realiste avec bec tranchant et regard libre",
-    tortue: "visage de tortue realiste avec carapace ancienne et regard patient",
-    "grue-couronnee": "visage de grue couronnee realiste avec couronne doree et regard elegant",
+function animalNameForPrompt(archetypeId: string): string {
+  const names: Record<string, string> = {
+    lion: "lion",
+    lionne: "lionne",
+    rhinoceros: "rhinoceros",
+    crocodile: "crocodile",
+    serpent: "serpent",
+    dauphin: "dauphin",
+    elephant: "elephant",
+    baobab: "baobab",
+    zebre: "zebre",
+    perroquet: "perroquet",
+    aigle: "aigle",
+    leopard: "leopard",
   };
-
-  if (labels[archetypeId]) return labels[archetypeId];
-  const readable = archetypeId.replace(/-/g, " ");
-  return `visage realiste du totem ${readable} avec details anatomiques precis et regard ancestral`;
+  return names[archetypeId] ?? "animal autorise du catalogue TOTEM";
 }
+
 
 function splitTextIntoChunks(text: string, count: number): string[] {
   const sentences = text
@@ -979,49 +966,13 @@ async function loadManuscriptFont(doc: PDFDocument): Promise<PDFFont | null> {
     }
   }
 
-  for (const remoteUrl of manuscriptFontUrls()) {
-    try {
-      const bytes = await fetchManuscriptFontBytes(remoteUrl);
-      return await doc.embedFont(bytes, { subset: true });
-    } catch {
-      // Keep trying candidate URLs; a final concise error is logged below.
-    }
-  }
-
-  console.error("[pdf] manuscript font unavailable", {
-    localPaths,
-    remoteUrls: manuscriptFontUrls(),
-  });
+  console.error("[pdf] manuscript font unavailable", { localPaths });
   return null;
 }
 
 async function fetchManuscriptFontBytes(remoteUrl: string): Promise<Uint8Array> {
-  const response = await fetch(remoteUrl, {
-    cache: "force-cache",
-    headers: { Accept: "text/css,*/*" },
-  });
-  if (!response.ok) throw new Error(`font_fetch_${response.status}`);
-
-  const contentType = response.headers.get("content-type") ?? "";
-  if (contentType.includes("text/css") || remoteUrl.includes("fonts.googleapis.com")) {
-    const css = await response.text();
-    const fontUrl = css.match(/url\((https:\/\/fonts\.gstatic\.com\/[^)]+)\)/)?.[1];
-    if (!fontUrl) throw new Error("font_css_url_missing");
-
-    const fontResponse = await fetch(fontUrl, { cache: "force-cache" });
-    if (!fontResponse.ok) throw new Error(`font_binary_fetch_${fontResponse.status}`);
-    return new Uint8Array(await fontResponse.arrayBuffer());
-  }
-
-  return new Uint8Array(await response.arrayBuffer());
+  throw new Error(`remote_font_disabled:${remoteUrl}`);
 }
-
-function manuscriptFontUrls(): string[] {
-  return [
-    "https://fonts.googleapis.com/css2?family=Dancing+Script:wght@400;500;600;700&display=swap",
-  ];
-}
-
 
 /**
  * Charge le parchemin (rouleau ouvert avec ses tringles) servant de fond aux
@@ -1293,14 +1244,9 @@ function splitLongPdfWord(word: string, font: PDFFont, size: number, maxWidth: n
 
 function normalizePdfText(value: string): string {
   return value
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[’‘]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/[–—]/g, "-")
-    .replace(/œ/g, "oe")
-    .replace(/Œ/g, "OE")
-    .replace(/[^\x20-\x7E]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -1310,8 +1256,6 @@ function normalizeManuscriptPdfText(value: string): string {
     .replace(/[’‘]/g, "'")
     .replace(/[“”]/g, '"')
     .replace(/[–—]/g, "-")
-    .replace(/œ/g, "oe")
-    .replace(/Œ/g, "OE")
     .replace(/[\x00-\x1F\x7F]/g, " ")
     .replace(/\s+/g, " ")
     .trim();
