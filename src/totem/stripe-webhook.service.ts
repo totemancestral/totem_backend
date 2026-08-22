@@ -23,6 +23,7 @@ import { CheckoutMetadata } from "./totem.types";
 import { computeScores, computeReveal, JUNIOR_TOTEM_ANIMALS } from "./junior.service";
 import { isCompleteAdultAnswers } from "./adult-answers";
 import { isCompleteJuniorAnswers } from "./junior-answers";
+import { ResendMailerService } from "./resend-mailer.service";
 
 @Injectable()
 export class StripeWebhookService {
@@ -37,6 +38,7 @@ export class StripeWebhookService {
     private readonly mirror: SupabaseMirrorService,
     private readonly generation: TotemAiService,
     private readonly storage: SupabaseStorageService,
+    private readonly mailer: ResendMailerService,
   ) {
     this.stripeSecretKey = config.get<string>("STRIPE_SECRET_KEY");
     this.webhookSecret = config.get<string>("STRIPE_WEBHOOK_SECRET");
@@ -482,6 +484,17 @@ export class StripeWebhookService {
         image: imageUrl ? { url: imageUrl, key: imageKey ?? "" } : null,
         scores,
       }).catch((err) => console.warn("[JuniorMirror] markJuniorDelivered warning:", err));
+
+      if (order.customerEmail) {
+        await this.mailer.sendJuniorDelivery({
+          email: order.customerEmail,
+          firstName: order.customerName ?? "Toi",
+          totemName: reveal.name,
+          quality: reveal.quality,
+          phrase: reveal.phrase,
+          locale: order.locale ?? undefined,
+        }).catch((err) => console.warn("[JuniorMailer] sendJuniorDelivery warning:", err));
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "junior_generation_failed";
       await this.prisma.totemOrder.update({

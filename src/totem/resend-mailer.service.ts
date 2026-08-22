@@ -76,6 +76,59 @@ export class ResendMailerService {
     return true;
   }
 
+  async sendJuniorDelivery(input: {
+    email: string;
+    firstName: string;
+    totemName: string;
+    quality: string;
+    phrase: string;
+    locale?: string;
+  }): Promise<boolean> {
+    const isFr = input.locale !== "en";
+    const subject = isFr
+      ? `Ton Totem Junior est prêt : ${input.totemName}`
+      : `Your Junior Totem is ready: ${input.totemName}`;
+
+    const html = `
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="utf-8"></head>
+    <body style="background-color: #0b0b14; color: #f5f0e8; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; padding: 40px 20px; text-align: center;">
+      <div style="max-width: 520px; margin: 0 auto; background: #121422; border: 1px solid rgba(216,173,77,0.3); border-radius: 16px; padding: 32px;">
+        <h1 style="color: #d4af37; font-size: 24px; text-transform: uppercase; margin-bottom: 8px;">
+          ${isFr ? "Ton Totem Junior s'est réveillé !" : "Your Junior Totem has awakened!"}
+        </h1>
+        <p style="color: rgba(245,240,232,0.8); font-size: 15px; margin-bottom: 24px;">
+          ${isFr ? `Bonjour ${input.firstName}, ton voyage a révélé ton animal totem et ton nom sacré.` : `Hello ${input.firstName}, your journey has revealed your totem animal and ancestral name.`}
+        </p>
+        <div style="background: rgba(216,173,77,0.08); border: 1px solid rgba(216,173,77,0.25); border-radius: 12px; padding: 20px; margin-bottom: 28px;">
+          <h2 style="color: #ecd99a; font-size: 20px; text-transform: uppercase; margin: 0 0 8px 0;">
+            ${input.totemName}
+          </h2>
+          <p style="color: #d4af37; font-size: 13px; font-weight: bold; margin: 0 0 12px 0;">
+            ${input.quality}
+          </p>
+          <p style="color: #f5f0e8; font-size: 14px; font-style: italic; margin: 0;">
+            "${input.phrase}"
+          </p>
+        </div>
+        <a href="https://totem-ancestral.com/${isFr ? "fr" : "en"}/domus_animi" style="display: inline-block; background: #d4af37; color: #0b0b14; font-weight: bold; text-decoration: none; padding: 14px 28px; border-radius: 8px; font-size: 14px; text-transform: uppercase;">
+          ${isFr ? "Accéder à mon espace personnel" : "Go to my dashboard"}
+        </a>
+      </div>
+    </body>
+    </html>
+    `;
+
+    await this.send({
+      to: [input.email],
+      subject,
+      html,
+    });
+
+    return true;
+  }
+
   async sendFailureAlert(orderId: string, error: string): Promise<void> {
     if (!this.alertEmail) return;
 
