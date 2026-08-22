@@ -592,12 +592,11 @@ function buildNgilMaskTotemPrompt(prompt: string, archetypeId: string, animalNam
 
   return [
     source,
-    `Mandatory subject: one authentic hand-carved Fang Ngil wooden mask, the only subject in the image. Its sculpted geometry, elongated form and restrained ornaments evoke the ${animal} totem without depicting an animal body. This is a finished visual artwork, not a portrait or a scene.`,
-    "Museum-grade art object, noble, majestic, glamorous and precious, with a rugged ancestral material quality that remains elegant and never grotesque.",
-    "Aged ivory kaolin pigment, deep natural wood grain, visible hand tools, subtle ochre and indigo accents, restrained ancestral gold details, rich black shadows.",
-    "Studio still life on a simple dark pedestal, frontal or slightly three-quarter view, controlled dramatic light, soft falloff, fine material detail, vertical 3:4 composition.",
-    "No human being, no human face, no human portrait, no human silhouette, no body, no torso, no bust, no animal body, no split face, no collage, no living subject.",
-    "Avoid CGI, plastic surfaces, cartoon style, grotesque distortion, excessive symmetry, glowing eyes, text, letters, logos, watermark, labels, UI or modern objects.",
+    `Mandatory subject: one authentic hand-carved Fang Ngil African wooden mask representing the ${animal} totem.`,
+    `The carved wooden features, elongated geometry, chiseled reliefs, and traditional African ceremonial engravings must distinctly evoke the ${animal}, seamlessly sculpted into an authentic Fang Ngil wooden mask.`,
+    "Museum-grade masterpiece of African tribal sculpture, carved from dark aged African hardwood with authentic white kaolin clay patina in the hollows, ochre pigments, and polished wood grain.",
+    "Studio museum lighting on a dark minimalist pedestal, frontal 3:4 portrait view, rich wood textures, chiseled artisan tool marks, ancient ceremonial majesty, vertical 3:4 composition.",
+    "No human faces, no human bodies, no living animals, no cartoon or anime, no CGI plastic look, no glowing neon, no modern elements, no text or watermarks.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -623,20 +622,37 @@ function fallbackScenePrompt(text: TotemTextPayload, page: number): string {
 
 function animalNameForPrompt(archetypeId: string): string {
   const names: Record<string, string> = {
-    lion: "lion",
-    lionne: "lionne",
-    rhinoceros: "rhinoceros",
-    crocodile: "crocodile",
-    serpent: "serpent",
-    dauphin: "dauphin",
-    elephant: "elephant",
-    baobab: "baobab",
-    zebre: "zebre",
-    perroquet: "perroquet",
-    aigle: "aigle",
-    leopard: "leopard",
+    // Adultes
+    lion: "lion majestueux à la crinière royale",
+    lionne: "lionne puissante et protectrice",
+    rhinoceros: "rhinocéros imposant aux cornes sacrées",
+    crocodile: "crocodile sacré des rivières primordiales",
+    serpent: "serpent sage aux écailles gravées de mystère",
+    dauphin: "dauphin guide des courants anciens",
+    elephant: "éléphant patriarche de force et de mémoire",
+    baobab: "baobab sacré aux branches cosmiques",
+    zebre: "zèbre aux lignes et zébrures rituelles",
+    perroquet: "perroquet messager aux plumes sculptées",
+    aigle: "aigle royal des cimes au bec acéré et regard perçant",
+    leopard: "léopard agile aux tâches d'ébène et de feu",
+    // Juniors
+    kwame_aigle: "aigle royal aux ailes déployées et regard perçant des hautes cimes",
+    dayo_lion: "lion solaire à la crinière flamboyante et regard de feu",
+    aida_panthere: "panthère noire nocturne aux yeux d'ambre et agilité mystique",
+    kofi_buffle: "buffle des plaines aux puissantes cornes sculptées d'endurance",
+    nia_antilope: "antilope gracieuse et véloce des savanes sacrées",
+    kemi_serpent: "serpent sage aux anneaux de connaissance",
+    tariq_elephant: "éléphant sage gardien de la mémoire ancestrale",
+    zola_guepard: "guépard rapide aux lignes fuselées de vitesse",
+    amara_faucon: "faucon chasseur au regard de précision infaillible",
+    malik_crocodile: "crocodile gardien des eaux profondes",
   };
-  return names[archetypeId] ?? "animal autorise du catalogue TOTEM";
+
+  if (names[archetypeId]) return names[archetypeId];
+
+  const parts = archetypeId.toLowerCase().split("_");
+  const candidate = parts[parts.length - 1];
+  return (candidate && names[candidate]) || candidate || "totem animal ancestral";
 }
 
 
