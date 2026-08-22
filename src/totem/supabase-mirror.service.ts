@@ -148,6 +148,79 @@ export class SupabaseMirrorService {
     if (error) throw new Error(`supabase_command_delivered_failed:${error.message}`);
   }
 
+  async markJuniorDelivered(input: {
+    order: TotemOrder;
+    reveal: {
+      totemId: string;
+      name: string;
+      quality: string;
+      phrase: string;
+      orderNumber: number;
+      dominant: string;
+      secondary: string;
+      share: { caption: string; messageDefi: string };
+    };
+    image?: { url: string; key: string } | null;
+    scores?: Record<string, number>;
+  }): Promise<void> {
+    const commandId = await this.findCommandId(input.order);
+    if (!commandId) return;
+
+    const numeroSerie = `JNR-${new Date().getFullYear()}-${commandId.slice(0, 8).toUpperCase()}`;
+    const oeuvre = {
+      user_id: input.order.userId,
+      commande_id: commandId,
+      numero_serie: numeroSerie,
+      nom_totem: input.reveal.name,
+      recit: input.reveal.phrase,
+      image_url: input.image?.url ?? null,
+      statut: "livree",
+      metadata: {
+        type: "junior",
+        source: "totem-backend",
+        totemOrderId: input.order.id,
+        totemId: input.reveal.totemId,
+        totem: {
+          name: input.reveal.name,
+          quality: input.reveal.quality,
+        },
+        orderNumber: input.reveal.orderNumber,
+        scores: input.scores,
+        dominant: input.reveal.dominant,
+        secondary: input.reveal.secondary,
+        share: input.reveal.share,
+        attribut: input.reveal.quality,
+        langue: input.order.locale ?? "fr",
+        offre: "junior",
+        imageKey: input.image?.key ?? null,
+      },
+    };
+
+    const { data: existing } = await this.supabase
+      .from("oeuvres")
+      .select("id")
+      .eq("commande_id", commandId)
+      .maybeSingle();
+
+    if (existing) {
+      await this.updateOeuvre(existing.id as string, oeuvre);
+    } else {
+      await this.insertOeuvre(oeuvre);
+    }
+
+    await this.supabase
+      .from("commandes")
+      .update({ statut: "livree" })
+      .eq("id", commandId);
+
+    // Delete any draft for this junior flow
+    await this.supabase
+      .from("brouillons_parcours")
+      .delete()
+      .eq("user_id", input.order.userId)
+      .eq("piste", "junior");
+  }
+
   async markRetrying(commandId: string): Promise<void> {
     await this.supabase.from("commandes").update({ statut: "en_generation" }).eq("id", commandId);
     await this.supabase.from("oeuvres").update({ statut: "en_generation" }).eq("commande_id", commandId);

@@ -475,6 +475,13 @@ export class StripeWebhookService {
           errorMessage: null,
         },
       });
+
+      await this.mirror.markJuniorDelivered({
+        order,
+        reveal,
+        image: imageUrl ? { url: imageUrl, key: imageKey ?? "" } : null,
+        scores,
+      }).catch((err) => console.warn("[JuniorMirror] markJuniorDelivered warning:", err));
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "junior_generation_failed";
       await this.prisma.totemOrder.update({

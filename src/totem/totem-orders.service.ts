@@ -144,6 +144,10 @@ export class TotemOrdersService {
     if (!order) throw new BadRequestException("order_not_found");
     if (order.userId !== input.userId) throw new BadRequestException("order_user_mismatch");
 
+    if (order.checkoutSessionId && !order.paymentIntentId) {
+      await this.webhooks.handleCheckoutSession(order.checkoutSessionId).catch(() => undefined);
+    }
+
     const updated = await this.prisma.totemOrder.update({
       where: { id: order.id },
       data: {
