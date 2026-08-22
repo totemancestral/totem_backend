@@ -173,7 +173,7 @@ export class SupabaseMirrorService {
       numero_serie: numeroSerie,
       nom_totem: input.reveal.name,
       recit: input.reveal.phrase,
-      image_url: input.image?.url ?? "/assets/oeuvre-visuelle-voix.webp",
+      image_url: input.image?.url ?? "/assets/masque-ngil-authentique.webp",
       statut: "livree",
       metadata: {
         type: "junior",

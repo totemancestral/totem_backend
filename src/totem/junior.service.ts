@@ -288,7 +288,7 @@ function readImageUrl(payload: unknown): string {
     const imageUrl = (payload as { imageUrl?: unknown }).imageUrl;
     if (typeof imageUrl === 'string' && imageUrl.length > 0) return imageUrl;
   }
-  return '/assets/oeuvre-visuelle-voix.webp';
+  return '/assets/masque-ngil-authentique.webp';
 }
 
 function hash(value: string) {
