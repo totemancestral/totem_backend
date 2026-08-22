@@ -7,14 +7,10 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemQueueService } from "./totem-queue.service";
 import { isCompleteAdultAnswers } from "./adult-answers";
-import { hasEnoughAnswersForGeneration } from "./stripe-webhook.service";
+import { StripeWebhookService, hasEnoughAnswersForGeneration } from "./stripe-webhook.service";
 
 const completeOrderSchema = z.object({
   externalCommandId: z.string().uuid(),
-  // Les dix questions du parcours, plus les entrees de contexte que le site
-  // peut joindre (le sexe declare sur le profil, par exemple). Un compte exact
-  // rendait la chaine cassante : toute entree supplementaire faisait echouer
-  // l'appel en silence et la commande n'etait jamais mise en file.
   answers: z.array(
     z.object({
       questionId: z.string().min(1).max(80),
@@ -39,17 +35,32 @@ export class TotemOrdersService {
     private readonly prisma: PrismaService,
     private readonly mirror: SupabaseMirrorService,
     private readonly queue: TotemQueueService,
+    private readonly webhook: StripeWebhookService,
     config: ConfigService,
   ) {
     this.stripeSecretKey = config.get<string>("STRIPE_SECRET_KEY");
   }
 
   async getByCheckoutSession(input: { checkoutSessionId: string; userId: string }) {
-    const order = await this.prisma.totemOrder.findUnique({
+    let order = await this.prisma.totemOrder.findUnique({
       where: { checkoutSessionId: input.checkoutSessionId },
     });
     if (!order) throw new NotFoundException("order_not_found");
     if (order.userId !== input.userId) throw new BadRequestException("order_user_mismatch");
+
+    // Live reconciliation with Stripe: if webhook was missed or delayed, synchronize on read
+    if (this.stripeSecretKey && order.checkoutSessionId && (!order.paymentIntentId || order.status === TotemOrderStatus.pending)) {
+      try {
+        this.stripe ??= new Stripe(this.stripeSecretKey);
+        const session = await this.stripe.checkout.sessions.retrieve(order.checkoutSessionId);
+        if (session.payment_status === "paid") {
+          await this.webhook.handleCheckoutSession(session);
+          order = (await this.prisma.totemOrder.findUnique({ where: { id: order.id } })) ?? order;
+        }
+      } catch (err) {
+        console.warn("[TotemOrdersService] Live Stripe session sync failed:", err);
+      }
+    }
 
     const paid = await this.isPaid(order);
     if (!paid) {

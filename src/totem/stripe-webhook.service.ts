@@ -55,7 +55,7 @@ export class StripeWebhookService {
     }
   }
 
-  private async handleCheckoutSession(payload: unknown): Promise<void> {
+  async handleCheckoutSession(payload: unknown): Promise<void> {
     const session = this.readCheckoutSession(payload);
 
     if (session.payment_status !== "paid") {
