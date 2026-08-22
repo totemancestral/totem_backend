@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { BadRequestException, Injectable, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma, TotemOrderStatus } from "@prisma/client";
@@ -69,7 +70,7 @@ export class CheckoutService {
       origine: config.get<number>("TOTEM_PRICE_ORIGINE_CENTS") ?? TOTEM_PRICES_CENTS.origine,
       ancestral: config.get<number>("TOTEM_PRICE_ANCESTRAL_CENTS") ?? TOTEM_PRICES_CENTS.ancestral,
       famille: config.get<number>("TOTEM_PRICE_FAMILLE_CENTS") ?? TOTEM_PRICES_CENTS.famille,
-      junior: config.get<number>("TOTEM_PRICE_JUNIOR_CENTS") ?? TOTEM_PRICES_CENTS.junior,
+      junior: TOTEM_PRICES_CENTS.junior, // Strictement 9,99 € (999 centimes)
     };
   }
 
@@ -79,24 +80,27 @@ export class CheckoutService {
     email?: string;
   }): Promise<{ id: string; url: string | null }> {
     const payload = this.readInput(input.body);
-    const amount = this.offerPrices[payload.offer];
+    const isJunior = payload.offer === "junior";
+    const amount = isJunior ? TOTEM_PRICES_CENTS.junior : this.offerPrices[payload.offer];
 
-    if (amount <= 0) {
+    if (amount <= 0 || (isJunior && amount !== 999)) {
       throw new BadRequestException("offer_price_invalid");
     }
 
+    const orderId = randomUUID();
     const baseMetadata = this.createBaseMetadata({
       userId: input.userId,
       email: input.email,
       payload,
+      orderId,
     });
 
-    const session = await this.readStripe().checkout.sessions.create({
+    const sessionParams: Stripe.Checkout.SessionCreateParams = {
       mode: "payment",
       customer_email: input.email,
       client_reference_id: input.userId,
       billing_address_collection: "auto",
-      automatic_tax: { enabled: true },
+      automatic_tax: isJunior ? { enabled: false } : { enabled: true },
       line_items: [
         {
           quantity: 1,
@@ -113,14 +117,21 @@ export class CheckoutService {
       payment_intent_data: {
         metadata: baseMetadata,
       },
-      success_url: payload.offer === "junior"
+      success_url: isJunior
         ? `${payload.successUrl ?? this.successUrl}&type=junior`
         : (payload.successUrl ?? this.successUrl),
       cancel_url: payload.cancelUrl ?? this.cancelUrl,
-    });
+    };
+
+    if (isJunior) {
+      sessionParams.payment_method_types = ["card"];
+    }
+
+    const session = await this.readStripe().checkout.sessions.create(sessionParams);
 
     if (payload.offer === "junior") {
       return this.createJuniorOrder({
+        orderId,
         payload,
         session,
         amount,
@@ -132,6 +143,7 @@ export class CheckoutService {
 
     const order = await this.prisma.totemOrder.create({
       data: {
+        id: orderId,
         userId: input.userId,
         customerEmail: input.email,
         customerName: payload.customerName,
@@ -154,7 +166,20 @@ export class CheckoutService {
         ...baseMetadata,
         orderId: order.id,
       },
-    });
+    }).catch(() => undefined);
+
+    const paymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent?.id;
+    if (paymentIntentId) {
+      await this.readStripe().paymentIntents.update(paymentIntentId, {
+        metadata: {
+          ...baseMetadata,
+          orderId: order.id,
+        },
+      }).catch(() => undefined);
+    }
 
     await this.mirror.attachCheckoutSession({
       externalCommandId: payload.externalCommandId,
@@ -166,6 +191,7 @@ export class CheckoutService {
   }
 
   private async createJuniorOrder(input: {
+    orderId: string;
     payload: JuniorCheckoutInput;
     session: Stripe.Checkout.Session;
     amount: number;
@@ -173,10 +199,11 @@ export class CheckoutService {
     email?: string;
     externalCommandId?: string;
   }) {
-    const { payload, session, amount, userId, email, externalCommandId } = input;
+    const { orderId, payload, session, amount, userId, email, externalCommandId } = input;
 
     const order = await this.prisma.totemOrder.create({
       data: {
+        id: orderId,
         userId,
         customerEmail: email,
         customerName: payload.firstName,
@@ -200,7 +227,24 @@ export class CheckoutService {
         offer: "junior",
         orderId: order.id,
       },
-    });
+    }).catch(() => undefined);
+
+    const paymentIntentId =
+      typeof session.payment_intent === "string"
+        ? session.payment_intent
+        : session.payment_intent?.id;
+    if (paymentIntentId) {
+      await this.readStripe().paymentIntents.update(paymentIntentId, {
+        metadata: {
+          userId,
+          ...(email ? { email } : {}),
+          ...(payload.firstName ? { prenom: payload.firstName } : {}),
+          ...(payload.locale ? { locale: payload.locale } : {}),
+          offer: "junior",
+          orderId: order.id,
+        },
+      }).catch(() => undefined);
+    }
 
     await this.mirror.attachCheckoutSession({
       externalCommandId,
@@ -238,17 +282,23 @@ export class CheckoutService {
     userId: string;
     email?: string;
     payload: CheckoutInput;
+    orderId?: string;
   }): Record<string, string> {
     const meta: Record<string, string> = {
       userId: input.userId,
       ...(input.email ? { email: input.email } : {}),
       offer: input.payload.offer,
+      ...(input.orderId ? { orderId: input.orderId } : {}),
     };
 
     if (input.payload.offer === "junior") {
       if (input.payload.firstName) meta.prenom = input.payload.firstName;
       if (input.payload.locale) meta.locale = input.payload.locale;
       meta.answers = JSON.stringify(input.payload.answers);
+      if (input.payload.externalCommandId) {
+        meta.externalCommandId = input.payload.externalCommandId;
+        meta.commande_id = input.payload.externalCommandId;
+      }
     } else {
       if (input.payload.customerName) meta.prenom = input.payload.customerName;
       if (input.payload.locale) meta.locale = input.payload.locale;

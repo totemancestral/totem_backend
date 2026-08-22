@@ -1,6 +1,18 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { PrismaService } from './prisma/prisma.service';
 
+@Controller()
+export class RootController {
+  @Get()
+  root(): { status: string; service: string; message: string } {
+    return {
+      status: 'ok',
+      service: 'totem-backend',
+      message: 'TOTEM ANCESTRAL API is running.',
+    };
+  }
+}
+
 @Controller('health')
 export class HealthController {
   constructor(

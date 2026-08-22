@@ -41,6 +41,11 @@ describe("parseCheckoutMetadata", () => {
     expect(md.externalCommandId).toBe("cmd-42");
   });
 
+  it("conserve orderId si fourni dans les metadonnees", () => {
+    const md = parseCheckoutMetadata({ userId: "u1", orderId: "ord_12345", ...q10 });
+    expect(md.orderId).toBe("ord_12345");
+  });
+
   it("rejette des metadonnees sans userId", () => {
     expect(() => parseCheckoutMetadata({ ...q10 })).toThrow();
   });

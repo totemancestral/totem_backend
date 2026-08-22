@@ -92,6 +92,10 @@ export class TotemAiService {
   private readonly openAiImageModel: string;
   private readonly openAiTtsModel: string;
   private readonly openAiTtsVoice: string;
+  private readonly elevenLabsApiKey?: string;
+  private readonly elevenLabsVoiceId?: string;
+  private readonly elevenLabsModelId: string;
+  private readonly imoleApiKey?: string;
   private readonly storyPageCount: number;
 
   constructor(config: ConfigService) {
@@ -101,6 +105,10 @@ export class TotemAiService {
     this.openAiImageModel = config.getOrThrow<string>("OPENAI_IMAGE_MODEL");
     this.openAiTtsModel = config.getOrThrow<string>("OPENAI_TTS_MODEL");
     this.openAiTtsVoice = config.getOrThrow<string>("OPENAI_TTS_VOICE");
+    this.elevenLabsApiKey = config.get<string>("ELEVENLABS_API_KEY");
+    this.elevenLabsVoiceId = config.get<string>("ELEVENLABS_VOICE_ID");
+    this.elevenLabsModelId = config.get<string>("ELEVENLABS_MODEL_ID") ?? "eleven_v3";
+    this.imoleApiKey = config.get<string>("IMOLE_API_KEY");
     this.storyPageCount = Math.min(config.get<number>("TOTEM_STORY_PAGE_COUNT") ?? 5, 5);
   }
 
@@ -198,7 +206,201 @@ export class TotemAiService {
     throw new Error("openai_image_payload_missing");
   }
 
+  private cachedGriotVoiceId?: string;
+
   async generateAudio(payload: AudioRequest): Promise<GeneratedArtefact> {
+    if (this.imoleApiKey) {
+      try {
+        return await this.generateAudioImole(payload);
+      } catch (error) {
+        console.error(
+          `[Imole API] Audio generation failed, falling back: ${error instanceof Error ? error.message : error}`,
+        );
+      }
+    }
+
+    if (this.elevenLabsApiKey) {
+      try {
+        return await this.generateAudioElevenLabs(payload);
+      } catch (error) {
+        console.error(
+          `[ElevenLabs] Audio generation failed, falling back to OpenAI TTS: ${error instanceof Error ? error.message : error}`,
+        );
+      }
+    }
+
+    return this.generateAudioOpenAi(payload);
+  }
+
+  private async generateAudioImole(payload: AudioRequest): Promise<GeneratedArtefact> {
+    const voiceId = this.elevenLabsVoiceId || (await this.resolveGriotVoiceId());
+    const response = await fetchWithTimeout(
+      "https://api.imole.app/v1/audio/speech",
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.imoleApiKey!}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: this.elevenLabsModelId || "eleven_v3",
+          input: payload.text,
+          voice_id: voiceId,
+          output_format: "mp3_44100_128",
+          language_code: "fr",
+          stability: 0.35,
+          similarity_boost: 0.85,
+        }),
+      },
+      180_000,
+    );
+
+    await assertOk(response, "imole_audio");
+    return {
+      bytes: Buffer.from(await response.arrayBuffer()),
+      contentType: "audio/mpeg",
+      extension: "mp3",
+    };
+  }
+
+  private async generateAudioElevenLabs(payload: AudioRequest): Promise<GeneratedArtefact> {
+    const voiceId = await this.resolveGriotVoiceId();
+    const response = await fetchWithTimeout(
+      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+      {
+        method: "POST",
+        headers: {
+          "xi-api-key": this.elevenLabsApiKey!,
+          "Content-Type": "application/json",
+          Accept: "audio/mpeg",
+        },
+        body: JSON.stringify({
+          text: payload.text,
+          model_id: this.elevenLabsModelId,
+          voice_settings: {
+            stability: 0.35,
+            similarity_boost: 0.85,
+            style: 0.45,
+            use_speaker_boost: true,
+          },
+        }),
+      },
+      180_000,
+    );
+
+    await assertOk(response, "elevenlabs_audio");
+    return {
+      bytes: Buffer.from(await response.arrayBuffer()),
+      contentType: "audio/mpeg",
+      extension: "mp3",
+    };
+  }
+
+  private async resolveGriotVoiceId(): Promise<string> {
+    if (this.elevenLabsVoiceId) {
+      return this.elevenLabsVoiceId;
+    }
+
+    if (this.cachedGriotVoiceId) {
+      return this.cachedGriotVoiceId;
+    }
+
+    // 1. Chercher si une voix nommée Griot ou Ancestral existe déjà sur le compte
+    try {
+      const listResponse = await fetchWithTimeout(
+        "https://api.elevenlabs.io/v1/voices",
+        {
+          headers: {
+            "xi-api-key": this.elevenLabsApiKey!,
+          },
+        },
+        30_000,
+      );
+
+      if (listResponse.ok) {
+        const data = (await listResponse.json()) as { voices?: Array<{ voice_id: string; name: string }> };
+        const existingVoice = data.voices?.find(
+          (v) =>
+            v.name.toLowerCase().includes("griot") ||
+            v.name.toLowerCase().includes("ancestral"),
+        );
+        if (existingVoice?.voice_id) {
+          this.cachedGriotVoiceId = existingVoice.voice_id;
+          return existingVoice.voice_id;
+        }
+      }
+    } catch {
+      // Continuer vers la création automatique
+    }
+
+    // 2. Création automatique de la voix de Griot Ancestral via l'API Voice Design d'ElevenLabs
+    try {
+      const designResponse = await fetchWithTimeout(
+        "https://api.elevenlabs.io/v1/voice-generation/generate-voice",
+        {
+          method: "POST",
+          headers: {
+            "xi-api-key": this.elevenLabsApiKey!,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            gender: "male",
+            accent: "african",
+            age: "old",
+            accent_strength: 1.4,
+            text: "Au commencement des terres anciennes, le souffle du vent portait la memoire des ancetres et des rois.",
+          }),
+        },
+        60_000,
+      );
+
+      if (designResponse.ok) {
+        const generationId =
+          designResponse.headers.get("generated_voice_id") ??
+          ((await designResponse.json().catch(() => ({}))) as { generated_voice_id?: string })
+            ?.generated_voice_id;
+
+        if (generationId) {
+          const createResponse = await fetchWithTimeout(
+            "https://api.elevenlabs.io/v1/voice-generation/create-voice",
+            {
+              method: "POST",
+              headers: {
+                "xi-api-key": this.elevenLabsApiKey!,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                voice_name: "Griot Ancestral",
+                voice_description:
+                  "Voix profonde, sage et chaleureuse d'un ancien griot africain narrant le recit ancestral.",
+                generated_voice_id: generationId,
+              }),
+            },
+            60_000,
+          );
+
+          if (createResponse.ok) {
+            const createdData = (await createResponse.json()) as { voice_id?: string };
+            if (createdData.voice_id) {
+              this.cachedGriotVoiceId = createdData.voice_id;
+              return createdData.voice_id;
+            }
+          }
+        }
+      }
+    } catch (error) {
+      console.warn(
+        `[ElevenLabs] Auto voice design creation failed: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+
+    // 3. Fallback sur une voix de conteur masculine grave si la création automatique échoue
+    const fallbackVoiceId = "JBFqnCBsd6RMkjVDRZzb";
+    this.cachedGriotVoiceId = fallbackVoiceId;
+    return fallbackVoiceId;
+  }
+
+  private async generateAudioOpenAi(payload: AudioRequest): Promise<GeneratedArtefact> {
     const chunks = chunkTtsText(payload.text, 3600);
     const buffers: Buffer[] = [];
 
@@ -375,7 +577,7 @@ function ensureStoryPages(text: TotemTextPayload, minimumCount: number): TotemSt
 }
 
 function buildAudioNarration(text: TotemTextPayload, minimumCount: number): string {
-    const source = text.audioMessage.trim() || text.parchmentText.trim();
+  const source = text.audioMessage.trim() || text.parchmentText.trim();
   if (!source) return "";
   return source;
 }
@@ -761,21 +963,25 @@ function drawParchmentStory(
     }
   });
 
-  // Insigne et sceau, poses en pied de la derniere page du recit.
+  // Insigne et sceau, poses en bas a droite de la derniere page du recit (sans chevauchement avec le texte).
+  const sealRadius = ref(34, input.width);
+  const sealX = box.x + box.width - sealRadius - ref(10, input.width);
+  const sealY = box.y + sealRadius + ref(8, input.width);
+
   drawCentered(
     cursor.page,
     input.titleFont,
     input.copy.insignia,
-    ref(20, input.width),
-    box.y + ref(100, input.width),
-    input.width,
+    ref(14, input.width),
+    sealY + sealRadius + ref(6, input.width),
+    sealX * 2,
     pdfColor("ink"),
   );
   drawWaxSeal(
     cursor.page,
-    input.width / 2,
-    box.y + ref(46, input.width),
-    ref(38, input.width),
+    sealX,
+    sealY,
+    sealRadius,
     input.titleFont,
   );
 }
@@ -880,7 +1086,7 @@ function fitParchmentText(input: {
   let paragraphGap = fontSize * 0.7;
   let pages = 1;
 
-  for (;;) {
+  for (; ;) {
     lineHeight = fontSize * 1.55;
     paragraphGap = fontSize * 0.7;
     blocks = input.paragraphs.map((paragraph) =>

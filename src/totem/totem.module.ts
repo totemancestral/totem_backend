@@ -1,5 +1,5 @@
 import { Module } from "@nestjs/common";
-import { HealthController } from "../health.controller";
+import { HealthController, RootController } from "../health.controller";
 import { PrismaModule } from "../prisma/prisma.module";
 import { CheckoutController } from "./checkout.controller";
 import { CheckoutService } from "./checkout.service";
@@ -23,6 +23,7 @@ import { TotemWorker } from "./totem.worker";
     PrismaModule,
   ],
   controllers: [
+    RootController,
     CheckoutController,
     TotemOrdersController,
     StripeWebhookController,

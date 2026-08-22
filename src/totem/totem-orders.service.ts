@@ -61,6 +61,7 @@ export class TotemOrdersService {
       offer: order.offer,
       paid: true,
       status: order.status,
+      errorMessage: order.errorMessage ?? null,
       juniorPayload: order.offer === "junior" ? order.juniorPayload : null,
       imageUrl: order.offer === "junior" ? order.imageUrl : null,
     };

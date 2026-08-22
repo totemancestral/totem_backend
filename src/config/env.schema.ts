@@ -45,4 +45,8 @@ export const envSchema = z.object({
   CONTACT_EMAIL: optionalEmail,
   ALERT_EMAIL: optionalEmail,
   CORS_ORIGIN: z.string().optional(),
+  ELEVENLABS_API_KEY: optionalString,
+  ELEVENLABS_VOICE_ID: optionalString,
+  ELEVENLABS_MODEL_ID: optionalString,
+  IMOLE_API_KEY: optionalString,
 });

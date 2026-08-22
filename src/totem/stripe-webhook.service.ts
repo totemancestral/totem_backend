@@ -153,6 +153,10 @@ export class StripeWebhookService {
       return;
     }
 
+    if (intent.metadata?.offer === "junior") {
+      return;
+    }
+
     if (!this.hasCompleteCheckoutMetadata(intent.metadata)) {
       return;
     }
@@ -255,6 +259,7 @@ export class StripeWebhookService {
       const existing = await tx.totemOrder.findFirst({
         where: {
           OR: [
+            ...(input.metadata.orderId ? [{ id: input.metadata.orderId }] : []),
             ...(input.metadata.externalCommandId ? [{ id: input.metadata.externalCommandId }] : []),
             { checkoutSessionId: input.checkoutSessionId },
             ...(input.paymentIntentId ? [{ paymentIntentId: input.paymentIntentId }] : []),
@@ -280,7 +285,7 @@ export class StripeWebhookService {
 
       return tx.totemOrder.create({
         data: {
-          id: input.metadata.externalCommandId,
+          id: input.metadata.orderId ?? input.metadata.externalCommandId,
           userId: input.metadata.userId,
           customerEmail: input.metadata.email,
           customerName: input.customerName,
@@ -399,40 +404,62 @@ export class StripeWebhookService {
       throw new BadRequestException("junior_answers_incomplete");
     }
 
-    const scores = computeScores(answers);
-    const reveal = computeReveal(answers);
-    const imageArtefact = await this.generation.generateImage({
-      orderId,
-      archetypeId: reveal.totemId,
-      animalName: JUNIOR_TOTEM_ANIMALS[reveal.totemId],
-      prompt: `Create a Junior TOTEM ancestral artwork for ${reveal.name}. The totem animal is ${JUNIOR_TOTEM_ANIMALS[reveal.totemId]}.`,
-    });
-    const image = await this.storage.store(orderId, "image", imageArtefact);
+    try {
+      const scores = computeScores(answers);
+      const reveal = computeReveal(answers);
+      const imageArtefact = await this.generation.generateImage({
+        orderId,
+        archetypeId: reveal.totemId,
+        animalName: JUNIOR_TOTEM_ANIMALS[reveal.totemId],
+        prompt: `Create a Junior TOTEM ancestral artwork for ${reveal.name}. The totem animal is ${JUNIOR_TOTEM_ANIMALS[reveal.totemId]}.`,
+      });
+      const image = await this.storage.store(orderId, "image", imageArtefact);
 
-    await this.prisma.totemOrder.update({
-      where: { id: orderId },
-      data: {
-        status: TotemOrderStatus.done,
-        juniorPayload: {
-          firstName: order.customerName ?? "Toi",
-          scores,
-          dominant: reveal.dominant,
-          secondary: reveal.secondary,
-          totemId: reveal.totemId,
-          totemName: reveal.name,
-          quality: reveal.quality,
-          orderNumber: reveal.orderNumber,
-          phrase: reveal.phrase,
-          share: reveal.share,
+      await this.prisma.totemOrder.update({
+        where: { id: orderId },
+        data: {
+          status: TotemOrderStatus.done,
+          juniorPayload: {
+            firstName: order.customerName ?? "Toi",
+            scores,
+            dominant: reveal.dominant,
+            secondary: reveal.secondary,
+            totemId: reveal.totemId,
+            totemName: reveal.name,
+            quality: reveal.quality,
+            orderNumber: reveal.orderNumber,
+            phrase: reveal.phrase,
+            share: reveal.share,
+            imageKey: image.key,
+            imageUrl: image.url,
+          },
           imageKey: image.key,
           imageUrl: image.url,
+          completedAt: new Date(),
+          errorMessage: null,
         },
-        imageKey: image.key,
-        imageUrl: image.url,
-        completedAt: new Date(),
-        errorMessage: null,
-      },
-    });
+      });
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "junior_generation_failed";
+      await this.prisma.totemOrder.update({
+        where: { id: orderId },
+        data: {
+          status: TotemOrderStatus.error,
+          errorMessage,
+        },
+      }).catch(() => undefined);
+
+      await this.prisma.totemPipelineError.create({
+        data: {
+          orderId,
+          step: "image",
+          message: errorMessage.slice(0, 1000),
+          attempts: 1,
+        },
+      }).catch(() => undefined);
+
+      throw error;
+    }
   }
 }
 

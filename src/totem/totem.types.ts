@@ -18,6 +18,7 @@ export type CheckoutMetadata = {
   prenom?: string;
   locale?: string;
   offer?: TotemOffer;
+  orderId?: string;
   checkoutSessionId?: string;
   externalCommandId?: string;
   answers: QuestionnaireAnswer[];

@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Res } from "@nestjs/common";
+import { Controller, Get, Param, Query, Res } from "@nestjs/common";
 import { Response } from "express";
 import { SupabaseStorageService } from "./supabase-storage.service";
 
@@ -7,14 +7,19 @@ export class TotemAssetsController {
   constructor(private readonly storage: SupabaseStorageService) {}
 
   @Get(":token")
-  async read(@Param("token") token: string, @Res() response: Response): Promise<void> {
+  async read(
+    @Param("token") token: string,
+    @Query("download") download: string | undefined,
+    @Res() response: Response,
+  ): Promise<void> {
     const object = await this.storage.readSignedObject(token);
+    const disposition = download === "1" || download === "true" ? "attachment" : "inline";
 
     response.setHeader("Content-Type", object.contentType);
-    response.setHeader("Cache-Control", "private, max-age=300");
+    response.setHeader("Cache-Control", "private, max-age=3600");
     response.setHeader(
       "Content-Disposition",
-      `attachment; filename="${downloadFilename(object.contentType)}"`,
+      `${disposition}; filename="${downloadFilename(object.contentType)}"`,
     );
 
     if (object.contentLength) {
