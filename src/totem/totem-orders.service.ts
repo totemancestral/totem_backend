@@ -144,8 +144,16 @@ export class TotemOrdersService {
     if (!order) throw new BadRequestException("order_not_found");
     if (order.userId !== input.userId) throw new BadRequestException("order_user_mismatch");
 
-    if (order.checkoutSessionId && !order.paymentIntentId) {
-      await this.webhooks.handleCheckoutSession(order.checkoutSessionId).catch(() => undefined);
+    if (this.stripeSecretKey && order.checkoutSessionId && !order.paymentIntentId) {
+      try {
+        this.stripe ??= new Stripe(this.stripeSecretKey);
+        const session = await this.stripe.checkout.sessions.retrieve(order.checkoutSessionId);
+        if (session.payment_status === "paid") {
+          await this.webhook.handleCheckoutSession(session);
+        }
+      } catch (err) {
+        console.warn("[OrdersService] Stripe session reconciliation warning:", err);
+      }
     }
 
     const updated = await this.prisma.totemOrder.update({
