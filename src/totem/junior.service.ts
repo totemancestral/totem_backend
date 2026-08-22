@@ -283,10 +283,12 @@ function qualityPhrase(quality: string) {
   return phrases[quality] ?? quality.toLowerCase();
 }
 
-function readImageUrl(payload: unknown): string | undefined {
-  if (typeof payload !== 'object' || payload === null) return undefined;
-  const imageUrl = (payload as { imageUrl?: unknown }).imageUrl;
-  return typeof imageUrl === 'string' && imageUrl.length > 0 ? imageUrl : undefined;
+function readImageUrl(payload: unknown): string {
+  if (typeof payload === 'object' && payload !== null) {
+    const imageUrl = (payload as { imageUrl?: unknown }).imageUrl;
+    if (typeof imageUrl === 'string' && imageUrl.length > 0) return imageUrl;
+  }
+  return '/assets/oeuvre-visuelle-voix.webp';
 }
 
 function hash(value: string) {
