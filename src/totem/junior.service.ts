@@ -167,7 +167,7 @@ export class JuniorService {
 
   async listTotems(authorization: string) {
     const user = await this.auth.requireUser(authorization);
-    return this.prisma.juniorTotem.findMany({
+    const juniorTotems = await this.prisma.juniorTotem.findMany({
       where: { userId: user.id },
       orderBy: { createdAt: 'desc' },
       select: {
@@ -183,6 +183,37 @@ export class JuniorService {
         secondary: true,
       },
     });
+
+    if (juniorTotems.length > 0) {
+      return juniorTotems;
+    }
+
+    const orders = await this.prisma.totemOrder.findMany({
+      where: {
+        userId: user.id,
+        offer: 'junior',
+        juniorPayload: { not: null as unknown as undefined },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return orders
+      .filter((o) => o.juniorPayload != null)
+      .map((o) => {
+        const payload = o.juniorPayload as Record<string, unknown>;
+        return {
+          id: o.id,
+          totemName: (payload.totemName as string) || 'Totem Junior',
+          quality: (payload.quality as string) || '',
+          phrase: (payload.phrase as string) || '',
+          orderNumber: (payload.orderNumber as number) || 0,
+          shareCount: 0,
+          createdAt: o.completedAt || o.createdAt,
+          scores: (payload.scores as Record<string, number>) || {},
+          dominant: (payload.dominant as string) || '',
+          secondary: (payload.secondary as string) || '',
+        };
+      });
   }
 
   async shareTotem(id: string, authorization: string) {

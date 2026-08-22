@@ -407,13 +407,49 @@ export class StripeWebhookService {
     try {
       const scores = computeScores(answers);
       const reveal = computeReveal(answers);
-      const imageArtefact = await this.generation.generateImage({
-        orderId,
-        archetypeId: reveal.totemId,
-        animalName: JUNIOR_TOTEM_ANIMALS[reveal.totemId],
-        prompt: `Create a Junior TOTEM ancestral artwork for ${reveal.name}. The totem animal is ${JUNIOR_TOTEM_ANIMALS[reveal.totemId]}.`,
-      });
-      const image = await this.storage.store(orderId, "image", imageArtefact);
+
+      let imageKey: string | null = null;
+      let imageUrl: string | null = null;
+      try {
+        const imageArtefact = await this.generation.generateImage({
+          orderId,
+          archetypeId: reveal.totemId,
+          animalName: JUNIOR_TOTEM_ANIMALS[reveal.totemId],
+          prompt: `Create a Junior TOTEM ancestral artwork for ${reveal.name}. The totem animal is ${JUNIOR_TOTEM_ANIMALS[reveal.totemId]}.`,
+        });
+        const image = await this.storage.store(orderId, "image", imageArtefact);
+        imageKey = image.key;
+        imageUrl = image.url;
+      } catch (imgErr) {
+        console.warn("[JuniorReveal] Image generation non-blocking error:", imgErr);
+      }
+
+      await this.prisma.userProfile.upsert({
+        where: { id: order.userId },
+        create: {
+          id: order.userId,
+          role: "junior",
+          firstName: order.customerName ?? undefined,
+          locale: order.locale ?? undefined,
+        },
+        update: {
+          role: "junior",
+        },
+      }).catch(() => undefined);
+
+      await this.prisma.juniorTotem.create({
+        data: {
+          userId: order.userId,
+          answers: answers as object,
+          scores,
+          dominant: reveal.dominant,
+          secondary: reveal.secondary,
+          totemName: reveal.name,
+          quality: reveal.quality,
+          phrase: reveal.phrase,
+          orderNumber: reveal.orderNumber,
+        },
+      }).catch(() => undefined);
 
       await this.prisma.totemOrder.update({
         where: { id: orderId },
@@ -430,11 +466,11 @@ export class StripeWebhookService {
             orderNumber: reveal.orderNumber,
             phrase: reveal.phrase,
             share: reveal.share,
-            imageKey: image.key,
-            imageUrl: image.url,
+            imageKey,
+            imageUrl,
           },
-          imageKey: image.key,
-          imageUrl: image.url,
+          imageKey,
+          imageUrl,
           completedAt: new Date(),
           errorMessage: null,
         },
