@@ -14,8 +14,10 @@ export class TotemAssetsController {
     @Res() response: Response,
   ): Promise<void> {
     const object = await this.storage.readSignedObject(token);
-    const isInline = inline === "1" || inline === "true" || download === "0";
-    const disposition = isInline ? "inline" : "attachment";
+    const isImage = object.contentType.startsWith("image/");
+    const isExplicitDownload = download === "1" || download === "true";
+    const isExplicitInline = download === "0" || download === "false" || inline === "1";
+    const disposition = isExplicitDownload ? "attachment" : (isExplicitInline || isImage ? "inline" : "attachment");
 
     response.setHeader("Content-Type", object.contentType);
     response.setHeader("Cache-Control", "private, max-age=3600");
