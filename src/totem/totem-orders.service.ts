@@ -67,6 +67,13 @@ export class TotemOrdersService {
       throw new HttpException({ code: "payment_not_confirmed" }, HttpStatus.PAYMENT_REQUIRED);
     }
 
+    if (order.offer === "junior" && order.status !== TotemOrderStatus.done) {
+      await this.webhook.computeJuniorRevealIfNeeded(order.id).catch((err) =>
+        console.warn("[TotemOrdersService] computeJuniorRevealIfNeeded warning:", err),
+      );
+      order = (await this.prisma.totemOrder.findUnique({ where: { id: order.id } })) ?? order;
+    }
+
     return {
       id: order.id,
       offer: order.offer,

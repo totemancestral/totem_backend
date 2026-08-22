@@ -295,18 +295,21 @@ function wrapEmail(title: string, inner: string): string {
 </table>`;
 }
 
-function fileLink(url: string, label: string): string {
-  return `<a href="${escapeAttribute(url)}" style="display:inline-block;margin:0 14px 8px 0;color:#f6c865;text-decoration:none;font-size:13px;border-bottom:1px solid rgba(246,200,101,.35);padding-bottom:2px">${label} &rarr;</a>`;
+function fileLink(url: string, label: string, isEn = false): string {
+  const downloadUrl = url.includes("?") ? `${url}&download=1` : `${url}?download=1`;
+  const prefix = isEn ? "📥 Download" : "📥 Télécharger";
+  return `<a href="${escapeAttribute(downloadUrl)}" download style="display:inline-block;margin:0 10px 10px 0;background:rgba(216,173,77,0.12);color:#f6c865;text-decoration:none;font-size:13px;border:1px solid rgba(246,200,101,.4);border-radius:6px;padding:8px 14px;font-weight:600">${prefix} ${label}</a>`;
 }
 
 function renderFallbackDelivery(payload: DeliveryPayload, copy: DeliveryCopy): RenderedEmail {
+  const isEn = payload.order.locale === "en";
   const name = escapeHtml(payload.order.ancestralName ?? copy.fallbackName);
   const inner = `
         <p style="margin:0 0 16px">${copy.ready}</p>
         <p style="margin:0 0 4px;color:#8a8677;font-size:13px;text-transform:uppercase;letter-spacing:.12em">${copy.nameLabel}</p>
         <p style="margin:0 0 22px;color:#f6c865;font-size:20px;font-family:Georgia,serif">${name}</p>
-        <p style="margin:0 0 10px">${copy.linksIntro}</p>
-        <p style="margin:0 0 18px">${fileLink(payload.imageUrl, copy.image)}${fileLink(payload.audioUrl, copy.audio)}${fileLink(payload.pdfUrl, copy.pdf)}</p>
+        <p style="margin:0 0 12px;font-weight:bold;color:#fff">${copy.linksIntro}</p>
+        <p style="margin:0 0 18px">${fileLink(payload.imageUrl, copy.image, isEn)}${fileLink(payload.audioUrl, copy.audio, isEn)}${fileLink(payload.pdfUrl, copy.pdf, isEn)}</p>
         <p style="margin:0;color:#8a8677;font-size:13px">${copy.signedNotice}</p>`;
 
   return {

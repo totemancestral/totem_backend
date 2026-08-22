@@ -10,10 +10,12 @@ export class TotemAssetsController {
   async read(
     @Param("token") token: string,
     @Query("download") download: string | undefined,
+    @Query("inline") inline: string | undefined,
     @Res() response: Response,
   ): Promise<void> {
     const object = await this.storage.readSignedObject(token);
-    const disposition = download === "1" || download === "true" ? "attachment" : "inline";
+    const isInline = inline === "1" || inline === "true" || download === "0";
+    const disposition = isInline ? "inline" : "attachment";
 
     response.setHeader("Content-Type", object.contentType);
     response.setHeader("Cache-Control", "private, max-age=3600");
@@ -31,9 +33,9 @@ export class TotemAssetsController {
 }
 
 function downloadFilename(contentType: string): string {
-  if (contentType === "application/pdf") return "totem-parchemin.pdf";
-  if (contentType.startsWith("audio/")) return "totem-narration.mp3";
-  if (contentType === "image/jpeg") return "totem-image.jpg";
-  if (contentType.startsWith("image/")) return "totem-image.png";
-  return "totem-asset";
+  if (contentType === "application/pdf") return "TOTEM-ANCESTRAL-Parchemin.pdf";
+  if (contentType.startsWith("audio/")) return "TOTEM-ANCESTRAL-Recit-Sacre.mp3";
+  if (contentType === "image/jpeg") return "TOTEM-ANCESTRAL-Oeuvre.jpg";
+  if (contentType.startsWith("image/")) return "TOTEM-ANCESTRAL-Oeuvre.png";
+  return "TOTEM-ANCESTRAL-Fichier";
 }
