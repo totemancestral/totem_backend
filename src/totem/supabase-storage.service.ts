@@ -44,7 +44,7 @@ export class SupabaseStorageService {
 
   async store(
     orderId: string,
-    kind: 'image' | 'audio' | 'pdf',
+    kind: 'image' | 'audio' | 'pdf' | 'certificate',
     artefact: GeneratedArtefact,
   ): Promise<StoredArtefact> {
     const key = [

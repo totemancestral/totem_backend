@@ -129,26 +129,37 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
       });
       const image = await this.storage.store(order.id, "image", imageArtefact);
 
-      const [audio, pdf] = await Promise.all([
+      const pdfPayload = {
+        orderId: order.id,
+        userId: order.userId,
+        customerName: order.customerName,
+        locale: order.locale,
+        offer: order.offer,
+        text,
+        answers,
+        image: imageArtefact,
+      };
+
+      // La voix ritualisee est reservee aux offres Ancestral/Revelation et
+      // Famille ; l'offre Origine ne la promet pas (cf. Offres.tsx).
+      const includeAudio = order.offer !== "origine";
+
+      const [audio, pdf, certificate] = await Promise.all([
+        includeAudio
+          ? this.generation
+              .generateAudio({
+                orderId: order.id,
+                archetypeId: text.archetypeId,
+                text: this.generation.buildAudioNarration(text),
+              })
+              .then((artefact) => this.storage.store(order.id, "audio", artefact))
+          : Promise.resolve(null),
         this.generation
-          .generateAudio({
-            orderId: order.id,
-            archetypeId: text.archetypeId,
-            text: this.generation.buildAudioNarration(text),
-          })
-          .then((artefact) => this.storage.store(order.id, "audio", artefact)),
-        this.generation
-          .generatePdf({
-            orderId: order.id,
-            userId: order.userId,
-            customerName: order.customerName,
-            locale: order.locale,
-            offer: order.offer,
-            text,
-            answers,
-            image: imageArtefact,
-          })
+          .generatePdf(pdfPayload)
           .then((artefact) => this.storage.store(order.id, "pdf", artefact)),
+        this.generation
+          .generateCertificate(pdfPayload)
+          .then((artefact) => this.storage.store(order.id, "certificate", artefact)),
       ]);
 
       const completedOrder = await this.prisma.totemOrder.update({
@@ -156,22 +167,22 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
         data: {
           status: TotemOrderStatus.done,
           imageKey: image.key,
-          audioKey: audio.key,
+          audioKey: audio?.key ?? null,
           pdfKey: pdf.key,
           parchmentKey: pdf.key,
-          certificateKey: pdf.key,
+          certificateKey: certificate.key,
           imageUrl: image.url,
-          audioUrl: audio.url,
+          audioUrl: audio?.url ?? null,
           pdfUrl: pdf.url,
           parchmentUrl: pdf.url,
-          certificateUrl: pdf.url,
+          certificateUrl: certificate.url,
           completedAt: new Date(),
           errorMessage: null,
         },
       });
 
-      await this.mirror.markDelivered({ order: completedOrder, text, image, audio, pdf });
-      await this.sendDeliveryBestEffort(completedOrder, image.url, audio.url, pdf.url);
+      await this.mirror.markDelivered({ order: completedOrder, text, image, audio, pdf, certificate });
+      await this.sendDeliveryBestEffort(completedOrder, image.url, audio?.url ?? null, pdf.url, certificate.url);
     } catch (error) {
       await this.registerFailure(orderId, error);
     } finally {
@@ -181,20 +192,22 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
 
   private async sendDeliveryIfNeeded(order: TotemOrder): Promise<void> {
     if (order.deliveryEmailSentAt) return;
-    if (!order.imageUrl || !order.audioUrl || !order.pdfUrl) {
+    const audioRequired = order.offer !== "origine";
+    if (!order.imageUrl || !order.pdfUrl || !order.certificateUrl || (audioRequired && !order.audioUrl)) {
       throw new Error("delivery_urls_missing");
     }
-    await this.sendDeliveryBestEffort(order, order.imageUrl, order.audioUrl, order.pdfUrl);
+    await this.sendDeliveryBestEffort(order, order.imageUrl, order.audioUrl, order.pdfUrl, order.certificateUrl);
   }
 
   private async sendDeliveryBestEffort(
     order: TotemOrder,
     imageUrl: string,
-    audioUrl: string,
+    audioUrl: string | null,
     pdfUrl: string,
+    certificateUrl: string,
   ): Promise<void> {
     try {
-      const sent = await this.mailer.sendDelivery({ order, imageUrl, audioUrl, pdfUrl });
+      const sent = await this.mailer.sendDelivery({ order, imageUrl, audioUrl, pdfUrl, certificateUrl });
       if (!sent) return;
       await this.prisma.totemOrder.update({
         where: { id: order.id },

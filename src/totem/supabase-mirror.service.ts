@@ -83,8 +83,9 @@ export class SupabaseMirrorService {
     order: TotemOrder;
     text: TotemTextPayload;
     image: StoredArtefact;
-    audio: StoredArtefact;
+    audio: StoredArtefact | null;
     pdf: StoredArtefact;
+    certificate: StoredArtefact;
   }): Promise<void> {
     const commandId = await this.findCommandId(input.order);
     if (!commandId) return;
@@ -97,8 +98,9 @@ export class SupabaseMirrorService {
       nom_totem: input.text.ancestralName,
       recit: composeDeliveredStory(input.text),
       image_url: input.image.url,
-      audio_url: input.audio.url,
+      audio_url: input.audio?.url ?? null,
       pdf_url: input.pdf.url,
+      certificate_url: input.certificate.url,
       statut: "livree",
       metadata: {
         source: "totem-backend",
@@ -118,8 +120,9 @@ export class SupabaseMirrorService {
         langue: input.order.locale ?? "fr",
         offre: input.order.offer,
         imageKey: input.image.key,
-        audioKey: input.audio.key,
+        audioKey: input.audio?.key ?? null,
         pdfKey: input.pdf.key,
+        certificateKey: input.certificate.key,
       },
     };
 
@@ -329,18 +332,30 @@ export class SupabaseMirrorService {
   }
 
   private async insertOeuvre(oeuvre: Record<string, unknown>): Promise<string> {
-    const { data, error } = await this.supabase
+    let { data, error } = await this.supabase
       .from("oeuvres")
       .insert(oeuvre)
       .select("id")
       .single();
+
+    if (error && isMissingColumnError(error.message, "certificate_url")) {
+      const patch = { ...oeuvre };
+      delete patch.certificate_url;
+      ({ data, error } = await this.supabase.from("oeuvres").insert(patch).select("id").single());
+    }
 
     if (error || !data) throw new Error(`supabase_oeuvre_mirror_failed:${error?.message}`);
     return data.id as string;
   }
 
   private async updateOeuvre(id: string, oeuvre: Record<string, unknown>): Promise<string> {
-    const { error } = await this.supabase.from("oeuvres").update(oeuvre).eq("id", id);
+    let { error } = await this.supabase.from("oeuvres").update(oeuvre).eq("id", id);
+
+    if (error && isMissingColumnError(error.message, "certificate_url")) {
+      const patch = { ...oeuvre };
+      delete patch.certificate_url;
+      ({ error } = await this.supabase.from("oeuvres").update(patch).eq("id", id));
+    }
 
     if (error) throw new Error(`supabase_oeuvre_mirror_failed:${error.message}`);
     return id;

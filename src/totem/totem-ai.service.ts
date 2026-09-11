@@ -444,6 +444,14 @@ export class TotemAiService {
     };
   }
 
+  async generateCertificate(payload: PdfRequest): Promise<GeneratedArtefact> {
+    return {
+      bytes: await renderTotemCertificate(payload),
+      contentType: "application/pdf",
+      extension: "pdf",
+    };
+  }
+
   private async downloadArtefact(
     url: string,
     fallbackContentType: string,
@@ -783,8 +791,69 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   const copy = pdfCopy(payload.locale);
   const parchment = await loadParchmentBackground(doc);
 
-  // PAGE 1 : la couverture. Titre, sous-titre, filet, l'unique image du
-  // totem, le nom ancestral, le destinataire et le sceau de cire.
+  // PAGE 1 : la couverture, identique au certificat autonome (cf.
+  // drawCertificateCover) — reprise ici pour garder le classeur complet en
+  // un seul document.
+  await drawCertificateCover(doc, payload, { width, height, titleFont, bodyFont, italicFont, manuscriptFont, copy, parchment });
+
+  // PAGE 2 : le recit complet, sans titres de mouvements.
+  drawParchmentStory(doc, {
+    width,
+    height,
+    titleFont,
+    bodyFont,
+    manuscriptFont,
+    movements: buildParchmentMovements(payload.text),
+    parchment,
+    copy,
+  });
+
+  return doc.save();
+}
+
+/**
+ * Le certificat autonome : un document d'une page reprenant exactement la
+ * couverture du classeur complet (titre, image, nom ancestral, destinataire,
+ * sceau de cire, offre, numero de commande). Genere separement du parchemin
+ * (renderTotemPdf) afin que "Carte ancestrale" et "Certificat" soient deux
+ * fichiers reellement distincts.
+ */
+async function renderTotemCertificate(payload: PdfRequest): Promise<Uint8Array> {
+  const doc = await PDFDocument.create();
+  doc.registerFontkit(fontkit);
+  const width = 595;
+  const height = 842;
+  const titleFont = await doc.embedFont(StandardFonts.TimesRomanBold);
+  const bodyFont = await doc.embedFont(StandardFonts.TimesRoman);
+  const italicFont = await doc.embedFont(StandardFonts.TimesRomanItalic);
+  const manuscriptFont = await loadManuscriptFont(doc);
+
+  const copy = pdfCopy(payload.locale);
+  const parchment = await loadParchmentBackground(doc);
+
+  await drawCertificateCover(doc, payload, { width, height, titleFont, bodyFont, italicFont, manuscriptFont, copy, parchment });
+
+  return doc.save();
+}
+
+/** Dessine la page de couverture/certificat : titre, sous-titre, filet, l'unique
+ * image du totem, le nom ancestral, le destinataire et le sceau de cire. */
+async function drawCertificateCover(
+  doc: PDFDocument,
+  payload: PdfRequest,
+  fonts: {
+    width: number;
+    height: number;
+    titleFont: PDFFont;
+    bodyFont: PDFFont;
+    italicFont: PDFFont;
+    manuscriptFont: PDFFont | null;
+    copy: ReturnType<typeof pdfCopy>;
+    parchment: Awaited<ReturnType<typeof loadParchmentBackground>>;
+  },
+): Promise<void> {
+  const { width, height, titleFont, bodyFont, italicFont, manuscriptFont, copy, parchment } = fonts;
+
   const firstPage = doc.addPage([width, height]);
   const cover = drawRoyalParchment(firstPage, width, height, parchment);
   const coverTop = cover.y + cover.height;
@@ -879,20 +948,6 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
     width,
     pdfColor("soft"),
   );
-
-  // PAGE 2 : le recit complet, sans titres de mouvements.
-  drawParchmentStory(doc, {
-    width,
-    height,
-    titleFont,
-    bodyFont,
-    manuscriptFont,
-    movements: buildParchmentMovements(payload.text),
-    parchment,
-    copy,
-  });
-
-  return doc.save();
 }
 
 /** Filet dore centre, repris du document de reference. */

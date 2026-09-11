@@ -6,8 +6,9 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 type DeliveryPayload = {
   order: TotemOrder;
   imageUrl: string;
-  audioUrl: string;
+  audioUrl: string | null;
   pdfUrl: string;
+  certificateUrl: string;
 };
 
 type DeliveryCopy = {
@@ -19,6 +20,7 @@ type DeliveryCopy = {
   image: string;
   audio: string;
   pdf: string;
+  certificate: string;
   signedNotice: string;
   fallbackName: string;
 };
@@ -134,8 +136,9 @@ export class ResendMailerService {
       ancestralName: escapeHtml(payload.order.ancestralName ?? copy.fallbackName),
       orderId: escapeHtml(payload.order.id),
       imageUrl: escapeAttribute(payload.imageUrl),
-      audioUrl: escapeAttribute(payload.audioUrl),
+      audioUrl: payload.audioUrl ? escapeAttribute(payload.audioUrl) : "",
       pdfUrl: escapeAttribute(payload.pdfUrl),
+      certificateUrl: escapeAttribute(payload.certificateUrl),
     };
     const template = await this.readTemplate("delivery", locale);
 
@@ -231,7 +234,8 @@ function readDeliveryCopy(locale: "fr" | "en"): DeliveryCopy {
       linksIntro: "Your files are available here:",
       image: "Image",
       audio: "Audio",
-      pdf: "Parchment (PDF)",
+      pdf: "Ancestral map (PDF)",
+      certificate: "Certificate",
       signedNotice: "These signed links remain valid for 30 days.",
       fallbackName: "Your totem",
     };
@@ -245,7 +249,8 @@ function readDeliveryCopy(locale: "fr" | "en"): DeliveryCopy {
     linksIntro: "Vos fichiers sont disponibles ici :",
     image: "Image",
     audio: "Audio",
-    pdf: "Parchemin (PDF)",
+    pdf: "Carte ancestrale (PDF)",
+    certificate: "Certificat",
     signedNotice: "Ces liens signes restent valides pendant 30 jours.",
     fallbackName: "Votre totem",
   };
@@ -299,7 +304,7 @@ function renderFallbackDelivery(payload: DeliveryPayload, copy: DeliveryCopy): R
         <p style="margin:0 0 4px;color:#8a8677;font-size:13px;text-transform:uppercase;letter-spacing:.12em">${copy.nameLabel}</p>
         <p style="margin:0 0 22px;color:#f6c865;font-size:20px;font-family:Georgia,serif">${name}</p>
         <p style="margin:0 0 12px;font-weight:bold;color:#fff">${copy.linksIntro}</p>
-        <p style="margin:0 0 18px">${fileLink(payload.imageUrl, copy.image, isEn)}${fileLink(payload.audioUrl, copy.audio, isEn)}${fileLink(payload.pdfUrl, copy.pdf, isEn)}</p>
+        <p style="margin:0 0 18px">${fileLink(payload.imageUrl, copy.image, isEn)}${payload.audioUrl ? fileLink(payload.audioUrl, copy.audio, isEn) : ""}${fileLink(payload.pdfUrl, copy.pdf, isEn)}${fileLink(payload.certificateUrl, copy.certificate, isEn)}</p>
         <p style="margin:0;color:#8a8677;font-size:13px">${copy.signedNotice}</p>`;
 
   return {
