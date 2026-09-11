@@ -260,7 +260,7 @@ export function computeReveal(answers: Record<string, { choice: string }>, first
     phrase,
     share: {
       caption: `${name}\nQuel ancetre dort en toi ?\n#RevealYourTotem`,
-      messageDefi: `J'ai découvert mon totem ancestral : ${name}. Toi, tu es quoi ? totemancestral.com`,
+      messageDefi: `J'ai découvert mon totem ancestral : ${name}. Toi, tu es quoi ? totem-ancestral.com`,
     },
   };
 }

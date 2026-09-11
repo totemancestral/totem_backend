@@ -854,15 +854,15 @@ function buildAudioFallback(context: AdultV3Context, parchmentText: string): str
 function fallbackShare(context: AdultV3Context) {
   if (context.language === "en") {
     return {
-      captionLinkedin: `${context.nomComplet}\nA symbolic fable has named my ancestral totem: ${context.archetype.english}.\nReveal yours: totemancestral.com #RevealYourTotem`,
-      messageWhatsapp: `I discovered my ancestral totem: ${context.archetype.english}. Your turn: totemancestral.com`,
+      captionLinkedin: `${context.nomComplet}\nA symbolic fable has named my ancestral totem: ${context.archetype.english}.\nReveal yours: totem-ancestral.com #RevealYourTotem`,
+      messageWhatsapp: `I discovered my ancestral totem: ${context.archetype.english}. Your turn: totem-ancestral.com`,
       messageClan: `#${context.orderNumber} enters the ${context.archetype.clanEn}; the Clan receives ${context.nomComplet}.`,
     };
   }
 
   return {
-    captionLinkedin: `${context.nomComplet}\nUne fable symbolique m'a donne mon totem ancestral : ${context.archetype.french}.\nRevele le tien : totemancestral.com #RevealYourTotem`,
-    messageWhatsapp: `J'ai decouvert mon totem ancestral : ${context.archetype.french}. A ton tour : totemancestral.com`,
+    captionLinkedin: `${context.nomComplet}\nUne fable symbolique m'a donne mon totem ancestral : ${context.archetype.french}.\nRevele le tien : totem-ancestral.com #RevealYourTotem`,
+    messageWhatsapp: `J'ai decouvert mon totem ancestral : ${context.archetype.french}. A ton tour : totem-ancestral.com`,
     messageClan: `#${context.orderNumber} entre dans le ${context.archetype.clanFr} ; le Clan accueille ${context.nomComplet}.`,
   };
 }
