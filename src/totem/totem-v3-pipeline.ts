@@ -1,4 +1,5 @@
 import { QuestionnaireAnswer, TotemStoryPage, TotemTextPayload } from "./totem.types";
+import { CultureFiche, cultureFicheForArchetype } from "./totem-culture";
 
 type Locale = "fr" | "en";
 type Choice = "A" | "B" | "C" | "D";
@@ -48,6 +49,13 @@ export type AdultV3Context = {
    */
   gender: Gender;
   imagePrompt: string;
+  /**
+   * Fiche culturelle regionale (Doc 17) correspondant au peuple de
+   * l'archetype tire, injectee comme trame de fond de l'Ouverture (Doc
+   * 16bis, recommandation 1) : un monde reel prete a l'ancetre imaginaire,
+   * jamais une affirmation genealogique sur le client.
+   */
+  cultureFiche: CultureFiche;
 };
 
 /** `null` quand le client n'a pas repondu : le recit reste alors neutre. */
@@ -561,6 +569,7 @@ export function buildAdultV3Context(input: {
     workTitleEn: `The ${archetype.english}'s ${archetype.quality}`,
     narrativeVariant: pickSeeded(["A", "B", "C", "D"] as const, seed, "variant"),
     visualFrame: pickSeeded([1, 2, 3, 4, 5] as const, seed, "visual-frame"),
+    cultureFiche: cultureFicheForArchetype(archetype.id),
   };
 
   return {
@@ -587,6 +596,14 @@ Dominante : ${context.dominant} · Secondaire : ${context.secondary}
 ARCHETYPE DETERMINE PAR LA MATRICE :
 ${context.archetype.french} · ${context.archetype.english} · ${context.archetype.people} (${context.archetype.region}) · ${context.archetype.quality}
 
+TERRES DE L'ANCETRE (trame de fond narrative, jamais un fait sur le client) :
+Zone : ${context.cultureFiche.zone}.
+Royaumes et peuples reels de cette zone : ${context.cultureFiche.royaumes}.
+Cosmogonie et spiritualite : ${context.cultureFiche.cosmogonie}.
+Pratiques et objets symboliques : ${context.cultureFiche.pratiques}.
+Structure sociale et valeurs : ${context.cultureFiche.valeurs}.
+Motifs de contes traditionnels de la zone : ${context.cultureFiche.contes}.
+
 NOM ANCESTRAL PRE-TIRE :
 Composante A : ${context.prenomA}
 Composante B : ${context.prenomB}
@@ -596,10 +613,17 @@ Nom complet attendu : ${context.nomComplet}
 REPONSES AU PARCOURS GRIOT :
 ${formatAnswers(context.answers)}
 
+REPONSES PIVOTS (a citer directement, voir A2) :
+${formatPivotAnswers(context.answers)}
+
 MISSION :
 1. A1 : valider l'archetype impose par les scores FETA et le nom ancestral compose.
-2. A2 : composer le Parchemin Ancestral en ${context.language}, 1500-1800 caracteres espaces compris, 5 mouvements separes par doubles sauts de ligne. Variante narrative : ${context.narrativeVariant}. Le nom "${context.nomComplet}" doit apparaitre au moins une fois.
-3. A3 : composer le script audio de 130-160 mots, phrases courtes, pauses avec "..." ou retours a la ligne.
+2. A2 : composer le Parchemin Ancestral en ${context.language}, 1500-1800 caracteres espaces compris, 5 mouvements separes par doubles sauts de ligne, variante narrative ${context.narrativeVariant}, structures en 3 temps emotionnels :
+   Temps 1, le manque ancien (mouvements Ouverture et Portrait) : installe une perte, une rupture ou un silence dans l'Histoire ou la lignee, jamais porte comme un sentiment personnel de l'ancetre (qui reste fort) ni du client a ce stade. Prends appui sur la trame "TERRES DE L'ANCETRE" ci dessus comme decor reel, sans jamais l'affirmer comme un fait sur le client (jamais "tu descends de", toujours au conditionnel narratif, par exemple "les terres d'ou vient ton ancetre imagine sont marquees par...").
+   Temps 2, l'epreuve (mouvement Epreuve) : un moment de tension ou de choix qui mobilise directement le temperament du client tel qu'il s'est revele dans ses reponses, pas une epreuve generique. Reprends litteralement ou quasi litteralement au moins une des reponses pivots ci dessus a un moment cle de ce mouvement : si un champ libre existe, cite le au plus pres des mots du client ; s'il est vide, construis la scene dans l'esprit du choix retenu, sans inventer de citation qui n'existe pas.
+   Temps 3, la reconnaissance (mouvements Transmission et Passage) : l'ancetre reconnait le client, s'adresse a lui directement, et referme la boucle ouverte au temps 1. C'est le pic emotionnel du texte. La derniere phrase du parchemin, sans exception, doit nommer le nom ancestral complet "${context.nomComplet}" et s'adresser au client a la deuxieme personne.
+   Interdit dans les 5 mouvements : toute liste d'adjectifs juxtaposes ("tu es courageux, sage et genereux"). Montre ces qualites en action dans une scene, jamais en les enonçant.
+3. A3 : composer le script audio comme une declamation du Parchemin (A2) lui meme, pas un texte independant : reprends le parchemin dans son integralite, en l'adaptant seulement pour l'oral (ponctuation de pause "..." ou retours a la ligne aux memes endroits que les 5 mouvements), avec une indication de ton entre crochets au debut de chaque mouvement ("[ton calme]" pour Ouverture et Portrait, "[tension]" pour Epreuve, "[intensite]" pour Transmission et Passage).
 4. A4 : produire un prompt image en anglais pour le generateur d'images (OpenAI gpt-image), 80-120 mots, purement descriptif, SANS parametres de type --ar/--stylize/--v/--seed, selon ce prompt de base : ${context.imagePrompt}
    L'image doit passer pour une VRAIE PHOTOGRAPHIE de studio, jamais pour une image generee. Ecris donc en vocabulaire photographique (appareil, optique, lumiere, matiere, texture de peau). N'emploie JAMAIS les termes "8k", "4k", "ultra detailed", "hyperrealistic", "photorealistic", "highly detailed", "masterpiece", "trending on artstation", "digital art", "render", "CGI", "concept art", "cinematic" : ils tirent le rendu vers le synthetique et le lisse. Privilegie les imperfections reelles (pores, grain, asymetrie legere, usure du bois du masque).
 5. A5 : produire les textes de partage LinkedIn/Instagram, WhatsApp et message Clan.
@@ -874,6 +898,24 @@ function formatAnswers(answers: Record<string, ParsedAnswer>): string {
     const choice = answer.skipped ? "Question passee" : answer.choice ?? "Non renseigne";
     const field = answer.field?.trim() || "Aucune reponse libre";
     return `Q${question} (${questionLabels[index]}) : "${field}" / Choix : ${choice}`;
+  }).join("\n");
+}
+
+// Questions pivots (Doc 16bis, 2.3) : les plus chargees emotionnellement,
+// citees directement dans l'Epreuve du parchemin (A2). Le serveur ne connait
+// que la lettre choisie, jamais le libelle de l'option (celui ci vit cote
+// frontend, cf. lib/adult-answers.ts) : sans champ libre, on ne peut donc pas
+// reprendre le vocabulaire exact de l'option, seulement son esprit.
+const PIVOT_QUESTIONS = [3, 7, 10] as const;
+
+function formatPivotAnswers(answers: Record<string, ParsedAnswer>): string {
+  return PIVOT_QUESTIONS.map((question) => {
+    const answer = answers[String(question)] ?? {};
+    const label = questionLabels[question - 1];
+    const field = answer.field?.trim();
+    if (field) return `Q${question} (${label}) : citation disponible, "${field}"`;
+    const choice = answer.skipped ? "question passee" : answer.choice ?? "non renseigne";
+    return `Q${question} (${label}) : pas de champ libre, choix ${choice} (construis dans l'esprit de ce choix, sans inventer de citation)`;
   }).join("\n");
 }
 
