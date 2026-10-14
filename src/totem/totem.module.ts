@@ -3,6 +3,8 @@ import { HealthController, RootController } from "../health.controller";
 import { PrismaModule } from "../prisma/prisma.module";
 import { CheckoutController } from "./checkout.controller";
 import { CheckoutService } from "./checkout.service";
+import { ConsultationCaurisController } from "./consultation-cauris.controller";
+import { ConsultationCaurisService } from "./consultation-cauris.service";
 import { JuniorController } from "./junior.controller";
 import { JuniorService } from "./junior.service";
 import { ResendMailerService } from "./resend-mailer.service";
@@ -29,6 +31,7 @@ import { TotemWorker } from "./totem.worker";
     StripeWebhookController,
     TotemAssetsController,
     JuniorController,
+    ConsultationCaurisController,
     HealthController,
   ],
   providers: [
@@ -43,6 +46,7 @@ import { TotemWorker } from "./totem.worker";
     SupabaseAuthService,
     SupabaseMirrorService,
     JuniorService,
+    ConsultationCaurisService,
   ],
 })
 export class TotemModule {}

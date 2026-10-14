@@ -39,7 +39,8 @@ model UserProfile {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  juniorTotems  JuniorTotem[]
+  juniorTotems          JuniorTotem[]
+  consultationReadings  ConsultationReading[]
 }
 
 enum UserRole {
@@ -109,6 +110,45 @@ model TotemOrder {
   @@index([status, createdAt])
   @@index([offer, createdAt])
   @@index([country])
+}
+
+enum CaurisSerie {
+  D1
+  D2
+  D3
+  D4
+  D5
+  D6
+  D7
+  D8
+}
+
+enum CaurisMood {
+  apaise
+  en_doute
+  en_combat
+}
+
+// Historique des tirages de la Banque D (cauris) : un tirage par semaine
+// calendaire (lundi a dimanche, Europe/Paris) et par client, cf.
+// totem-cauris-draw.ts. weekKey permet de verifier rapidement si le client a
+// deja tire cette semaine, sans recalculer a partir de createdAt.
+model ConsultationReading {
+  id          String      @id @default(cuid())
+  userId      String
+  archetypeId String
+  serie       CaurisSerie
+  imageCode   String
+  paroleCode  String
+  gesteCode   String
+  mood        CaurisMood?
+  weekKey     String
+  createdAt   DateTime    @default(now())
+
+  user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, weekKey])
 }
 
 model TotemPipelineError {
