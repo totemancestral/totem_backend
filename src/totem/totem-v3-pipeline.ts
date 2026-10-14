@@ -578,10 +578,33 @@ export function buildAdultV3Context(input: {
   };
 }
 
-export function buildAdultV3GenerationPrompt(context: AdultV3Context): string {
+/**
+ * Resultat du premier appel IA (le Recit : A1, A2, A5). L'audio (A3) n'est
+ * plus genere par l'IA : `movementTexts` porte les 5 mouvements deja ecrits,
+ * a partir desquels le code derive la declamation (voir `buildDeclaimedAudio`)
+ * et le prompt image du second appel (voir `buildAdultV3ImagePrompt`).
+ */
+export type AdultV3RecitResult = {
+  archetypeId: string;
+  ancestralName: string;
+  parchmentText: string;
+  movementTexts: string[];
+  audioMessage: string;
+  shareMessages: {
+    captionLinkedin: string;
+    messageWhatsapp: string;
+    messageClan: string;
+  };
+  workTitleFr: string;
+  workTitleEn: string;
+  people: string;
+  region: string;
+};
+
+export function buildAdultV3RecitPrompt(context: AdultV3Context): string {
   return `Tu es le moteur artistique V3 de TOTEM ANCESTRAL.
 
-Tu executes la chaine A1, A2, A3, A4 et A5 dans une seule reponse JSON stricte. TOTEM ANCESTRAL est une experience artistique et symbolique : ce n'est pas de la genealogie, ni de la science, ni de la divination. C'est une fable.
+Tu executes la chaine A1, A2 et A5 dans une seule reponse JSON stricte. Le Recit que tu ecris ici sera fige : un second appel derivera ensuite le prompt image depuis ton texte, sans le modifier. TOTEM ANCESTRAL est une experience artistique et symbolique : ce n'est pas de la genealogie, ni de la science, ni de la divination. C'est une fable.
 
 DONNEES COMMUNES :
 Prenom : ${context.firstName}
@@ -623,10 +646,7 @@ MISSION :
    Temps 2, l'epreuve (mouvement Epreuve) : un moment de tension ou de choix qui mobilise directement le temperament du client tel qu'il s'est revele dans ses reponses, pas une epreuve generique. Reprends litteralement ou quasi litteralement au moins une des reponses pivots ci dessus a un moment cle de ce mouvement : si un champ libre existe, cite le au plus pres des mots du client ; s'il est vide, construis la scene dans l'esprit du choix retenu, sans inventer de citation qui n'existe pas.
    Temps 3, la reconnaissance (mouvements Transmission et Passage) : l'ancetre reconnait le client, s'adresse a lui directement, et referme la boucle ouverte au temps 1. C'est le pic emotionnel du texte. La derniere phrase du parchemin, sans exception, doit nommer le nom ancestral complet "${context.nomComplet}" et s'adresser au client a la deuxieme personne.
    Interdit dans les 5 mouvements : toute liste d'adjectifs juxtaposes ("tu es courageux, sage et genereux"). Montre ces qualites en action dans une scene, jamais en les enonçant.
-3. A3 : composer le script audio comme une declamation du Parchemin (A2) lui meme, pas un texte independant : reprends le parchemin dans son integralite, en l'adaptant seulement pour l'oral (ponctuation de pause "..." ou retours a la ligne aux memes endroits que les 5 mouvements), avec une indication de ton entre crochets au debut de chaque mouvement ("[ton calme]" pour Ouverture et Portrait, "[tension]" pour Epreuve, "[intensite]" pour Transmission et Passage).
-4. A4 : produire un prompt image en anglais pour le generateur d'images (OpenAI gpt-image), 80-120 mots, purement descriptif, SANS parametres de type --ar/--stylize/--v/--seed, selon ce prompt de base : ${context.imagePrompt}
-   L'image doit passer pour une VRAIE PHOTOGRAPHIE de studio, jamais pour une image generee. Ecris donc en vocabulaire photographique (appareil, optique, lumiere, matiere, texture de peau). N'emploie JAMAIS les termes "8k", "4k", "ultra detailed", "hyperrealistic", "photorealistic", "highly detailed", "masterpiece", "trending on artstation", "digital art", "render", "CGI", "concept art", "cinematic" : ils tirent le rendu vers le synthetique et le lisse. Privilegie les imperfections reelles (pores, grain, asymetrie legere, usure du bois du masque).
-5. A5 : produire les textes de partage LinkedIn/Instagram, WhatsApp et message Clan.
+3. A5 : produire les textes de partage LinkedIn/Instagram, WhatsApp et message Clan.
 
 REGLES STRICTES :
 - Ne jamais presenter l'oeuvre comme une verite ethnique, historique ou scientifique. C'est une fable artistique, non une genealogie, une divination ou une preuve.
@@ -635,8 +655,6 @@ REGLES STRICTES :
 - Pas d'emojis, pas de texte marketing, pas de cliches, pas de nom de divinite, de priere, de rituel ou de formule sacree.
 - Ecris une prose francaise relue : accords, orthographe, ponctuation, enchainements logiques et vocabulaire precis. Le texte doit rester humain, sobre et singulier, sans marqueur de generation automatique.
 - PONCTUATION : n'utilise JAMAIS de tiret (-) ni de tiret cadratin (—) pour separer des mots, des idees ou des phrases, ni comme incise, ni devant un numero. Emploie uniquement une ponctuation francaise correcte : virgule, point, deux-points, point-virgule, parentheses. Le tiret n'est admis qu'a l'interieur d'un mot compose (« sous-bois », « au-dela »).
-- Image : masque Ngil Fang sculpte en bois, seul sujet de l'image, objet d'art premium et imprimable. Ses volumes et ornements evoquent exclusivement l'animal totem impose, sans representer d'animal vivant. Matiere rude et patinee, mais noble, glamour, splendide et majestueuse, palette noir profond, or ancestral, ocre, indigo et ivoire, cadrage vertical 3:4, en langage naturel sans parametres techniques.
-- Interdiction absolue pour l'image : humain, visage humain, portrait humain, silhouette humaine, corps humain, corps animal, moitie de visage, collage ou sujet vivant.
 
 REPONSE JSON STRICTE, sans Markdown ni texte avant/apres :
 {
@@ -662,17 +680,6 @@ REPONSE JSON STRICTE, sans Markdown ni texte avant/apres :
     "character_count": 1650,
     "narrative_variant_used": "${context.narrativeVariant}"
   },
-  "a3": {
-    "audio_script": "Script complet",
-    "word_count": 145,
-    "estimated_duration_seconds": 88
-  },
-  "a4": {
-    "image_prompt": "${context.imagePrompt}",
-    "personality_keywords": ["kw1", "kw2", "kw3"],
-    "visual_elements": "Elements visuels uniques",
-    "visual_frame_used": ${context.visualFrame}
-  },
   "a5": {
     "caption_linkedin": "Caption LinkedIn/Instagram",
     "message_whatsapp": "Message WhatsApp",
@@ -681,31 +688,72 @@ REPONSE JSON STRICTE, sans Markdown ni texte avant/apres :
 }`;
 }
 
-export function normalizeAdultV3Response(
+/**
+ * Second appel IA : le Recit (A1/A2) est deja fige et transmis tel quel.
+ * Seule mission, A4, deriver le prompt image depuis le mouvement Passage
+ * (pic emotionnel) et la reponse du client sur son symbole interieur (Q9).
+ */
+export function buildAdultV3ImagePrompt(context: AdultV3Context, recit: AdultV3RecitResult): string {
+  const transmission =
+    recit.movementTexts.length >= 4 ? recit.movementTexts[recit.movementTexts.length - 2] : "";
+  const passage = recit.movementTexts.at(-1) || recit.parchmentText;
+
+  return `Tu es le moteur artistique V3 de TOTEM ANCESTRAL, etape A4 seule.
+
+Le Recit (A1, A2) est deja ecrit et fige ci dessous. Tu ne le modifies pas : tu en derives uniquement le prompt image.
+
+ARCHETYPE : ${context.archetype.french} · ${context.archetype.english} · ${context.archetype.people} (${context.archetype.region})
+
+MOUVEMENT TRANSMISSION DU RECIT FIGE :
+${transmission || "(non isole, voir le mouvement Passage ci-dessous)"}
+
+MOUVEMENT PASSAGE DU RECIT FIGE (pic emotionnel, symbole final) :
+${passage}
+
+REPONSE DU CLIENT SUR SON SYMBOLE INTERIEUR :
+${formatSymbolAnswer(context.answers)}
+
+PROMPT DE BASE (a enrichir, ne jamais contredire) :
+${context.imagePrompt}
+
+MISSION :
+A4 : produire un prompt image en anglais pour le generateur d'images (OpenAI gpt-image), 80-120 mots, purement descriptif, SANS parametres de type --ar/--stylize/--v/--seed. Le prompt doit :
+- garder le masque Ngil Fang sculpte en bois comme seul sujet, objet d'art premium et imprimable dont les volumes et ornements evoquent exclusivement l'animal totem impose, sans representer d'animal vivant ;
+- s'inspirer du symbole qui se degage du mouvement Passage ci dessus et de la reponse du client sur son symbole interieur, sans ajouter de texte, de lettre ni de sujet vivant a l'image ;
+- faire passer l'image pour une VRAIE PHOTOGRAPHIE de studio, jamais pour une image generee : vocabulaire photographique (appareil, optique, lumiere, matiere, texture de peau), imperfections reelles (pores, grain, asymetrie legere, usure du bois du masque). N'emploie JAMAIS les termes "8k", "4k", "ultra detailed", "hyperrealistic", "photorealistic", "highly detailed", "masterpiece", "trending on artstation", "digital art", "render", "CGI", "concept art", "cinematic".
+- Matiere rude et patinee, mais noble, glamour, splendide et majestueuse, palette noir profond, or ancestral, ocre, indigo et ivoire, cadrage vertical 3:4, en langage naturel sans parametres techniques.
+Interdiction absolue dans le prompt image : humain, visage humain, portrait humain, silhouette humaine, corps humain, corps animal, moitie de visage, collage ou sujet vivant.
+
+REPONSE JSON STRICTE, sans Markdown ni texte avant/apres :
+{
+  "a4": {
+    "image_prompt": "${context.imagePrompt}",
+    "personality_keywords": ["kw1", "kw2", "kw3"],
+    "visual_elements": "Elements visuels uniques tires du mouvement Passage",
+    "visual_frame_used": ${context.visualFrame}
+  }
+}`;
+}
+
+export function normalizeAdultV3RecitResult(
   raw: unknown,
   context: AdultV3Context,
-): TotemTextPayload {
+): AdultV3RecitResult {
   const root = isRecord(raw) ? raw : {};
   const a1 = readRecord(root.a1) ?? root;
   const a2 = readRecord(root.a2) ?? root;
-  const a3 = readRecord(root.a3) ?? root;
-  const a4 = readRecord(root.a4) ?? root;
   const a5 = readRecord(root.a5) ?? {};
   const candidateName = readString(a1.nom_complet);
   const ancestralName = isCanonicalTotemName(candidateName) ? candidateName : context.nomComplet;
   const parchmentText = readString(a2.parchment_text) || buildFallbackParchment(context);
-  const audioMessage = readString(a3.audio_script) || buildAudioFallback(context, parchmentText);
-  const imagePrompt =
-    readString(a4.image_prompt) || readString(a4.midjourney_prompt) || context.imagePrompt;
-  const storyPages = buildStoryPagesFromMovements(a2, parchmentText, imagePrompt);
+  const movementTexts = extractMovementTexts(a2, parchmentText);
 
   return {
     archetypeId: context.archetype.id,
     ancestralName,
     parchmentText,
-    audioMessage,
-    imagePrompt,
-    storyPages,
+    movementTexts,
+    audioMessage: buildDeclaimedAudio(movementTexts),
     shareMessages: {
       captionLinkedin: readString(a5.caption_linkedin) || fallbackShare(context).captionLinkedin,
       messageWhatsapp: readString(a5.message_whatsapp) || fallbackShare(context).messageWhatsapp,
@@ -715,6 +763,37 @@ export function normalizeAdultV3Response(
     workTitleEn: readString(a1.work_title_en) || context.workTitleEn,
     people: readString(a1.people) || context.archetype.people,
     region: readString(a1.region) || context.archetype.region,
+  };
+}
+
+export function normalizeAdultV3ImageResult(
+  raw: unknown,
+  context: AdultV3Context,
+): { imagePrompt: string } {
+  const root = isRecord(raw) ? raw : {};
+  const a4 = readRecord(root.a4) ?? root;
+  const imagePrompt =
+    readString(a4.image_prompt) || readString(a4.midjourney_prompt) || context.imagePrompt;
+  return { imagePrompt };
+}
+
+export function buildAdultV3Payload(
+  recit: AdultV3RecitResult,
+  imagePrompt: string,
+  context: AdultV3Context,
+): TotemTextPayload {
+  return {
+    archetypeId: recit.archetypeId,
+    ancestralName: recit.ancestralName,
+    parchmentText: recit.parchmentText,
+    audioMessage: recit.audioMessage,
+    imagePrompt,
+    storyPages: buildStoryPagesFromMovements(recit.movementTexts, imagePrompt),
+    shareMessages: recit.shareMessages,
+    workTitleFr: recit.workTitleFr,
+    workTitleEn: recit.workTitleEn,
+    people: recit.people,
+    region: recit.region,
     scores: context.scores,
     dominant: context.dominant,
     secondary: context.secondary,
@@ -724,7 +803,9 @@ export function normalizeAdultV3Response(
 }
 
 export function buildAdultV3FallbackPayload(context: AdultV3Context): TotemTextPayload {
-  return normalizeAdultV3Response({}, context);
+  const recit = normalizeAdultV3RecitResult({}, context);
+  const image = normalizeAdultV3ImageResult({}, context);
+  return buildAdultV3Payload(recit, image.imagePrompt, context);
 }
 
 function isCanonicalTotemName(value: string): boolean {
@@ -817,30 +898,40 @@ function buildV3ImagePrompt(context: Omit<AdultV3Context, "imagePrompt">): strin
 }
 
 
-function buildStoryPagesFromMovements(
-  a2: Record<string, unknown>,
-  parchmentText: string,
-  imagePrompt: string,
-): TotemStoryPage[] {
+function extractMovementTexts(a2: Record<string, unknown>, parchmentText: string): string[] {
   const movementKeys = ["opening", "portrait", "trial", "transmission", "passage"] as const;
-  const titles = ["L'Ouverture", "Le Portrait", "L'Epreuve", "La Transmission", "Le Passage"];
   const movementTexts = movementKeys
     .map((key) => readString(a2[key]))
     .filter((value) => value.trim().length > 0);
-  const texts =
-    movementTexts.length > 0
-      ? movementTexts
-      : parchmentText
-          .split(/\n{2,}/)
-          .map((paragraph) => paragraph.trim())
-          .filter(Boolean);
 
-  return texts.slice(0, 5).map((text, index) => ({
+  return movementTexts.length > 0
+    ? movementTexts
+    : parchmentText
+        .split(/\n{2,}/)
+        .map((paragraph) => paragraph.trim())
+        .filter(Boolean);
+}
+
+function buildStoryPagesFromMovements(movementTexts: string[], imagePrompt: string): TotemStoryPage[] {
+  const titles = ["L'Ouverture", "Le Portrait", "L'Epreuve", "La Transmission", "Le Passage"];
+
+  return movementTexts.slice(0, 5).map((text, index) => ({
     page: index + 1,
     title: titles[index] ?? `Mouvement ${index + 1}`,
     text,
     imagePrompt: `${imagePrompt}, visual detail for this movement: ${text.slice(0, 280)}`,
   }));
+}
+
+// Ton de declamation par mouvement (ex A3, desormais derive en code puisque
+// l'audio est la lecture du Parchemin lui meme, cf. buildAdultV3RecitPrompt).
+const MOVEMENT_TONES = ["[ton calme]", "[ton calme]", "[tension]", "[intensite]", "[intensite]"];
+
+function buildDeclaimedAudio(movementTexts: string[]): string {
+  return movementTexts
+    .slice(0, 5)
+    .map((text, index) => `${MOVEMENT_TONES[index] ?? "[ton calme]"} ${text}`)
+    .join("\n\n");
 }
 
 function buildFallbackParchment(context: AdultV3Context): string {
@@ -859,20 +950,6 @@ function buildFallbackParchment(context: AdultV3Context): string {
     `Un ancetre imagine aurait appris a garder le passage, a lire l'heure juste, et a faire du silence une force attentive.`,
     `${context.firstName}, recois ceci comme une oeuvre : un nom, un passage, et une lampe posee devant le prochain pas.`,
   ].join("\n\n");
-}
-
-function buildAudioFallback(context: AdultV3Context, parchmentText: string): string {
-  const passage = parchmentText
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
-    .at(-1);
-
-  if (context.language === "en") {
-    return `${context.firstName}, listen...\n\nA name has been placed before you: ${context.nomComplet}. It is not proof, but a lamp. In this fable, the ${context.archetype.english} walks near the old memory of ${context.archetype.people} lands.\n\nCarry ${context.archetype.quality.toLowerCase()} without noise. Let it guide your hand when the road narrows.\n\n${passage ?? "Walk with a quiet heart, and leave behind what does not deserve your strength."}`;
-  }
-
-  return `${context.firstName}, ecoute...\n\nUn nom a ete pose devant toi : ${context.nomComplet}. Ce n'est pas une preuve, c'est une lampe. Dans cette fable, le ${context.archetype.french} marche pres de l'ancienne memoire ${context.archetype.people}.\n\nPorte ${context.archetype.quality.toLowerCase()} sans bruit. Laisse ce signe guider ta main quand la route se resserre.\n\n${passage ?? "Marche avec le coeur calme, et laisse derriere toi ce qui ne merite pas ta force."}`;
 }
 
 function fallbackShare(context: AdultV3Context) {
@@ -917,6 +994,18 @@ function formatPivotAnswers(answers: Record<string, ParsedAnswer>): string {
     const choice = answer.skipped ? "question passee" : answer.choice ?? "non renseigne";
     return `Q${question} (${label}) : pas de champ libre, choix ${choice} (construis dans l'esprit de ce choix, sans inventer de citation)`;
   }).join("\n");
+}
+
+// Q9, "Le symbole interieur" (cf. questionLabels) : la reponse la plus directe
+// pour deriver le prompt image (A4, second appel) depuis le mouvement Passage.
+function formatSymbolAnswer(answers: Record<string, ParsedAnswer>): string {
+  const question = 9;
+  const answer = answers[String(question)] ?? {};
+  const label = questionLabels[question - 1];
+  const field = answer.field?.trim();
+  if (field) return `Q${question} (${label}) : "${field}"`;
+  const choice = answer.skipped ? "question passee" : answer.choice ?? "non renseigne";
+  return `Q${question} (${label}) : pas de champ libre, choix ${choice} (construis dans l'esprit de ce choix, sans inventer de symbole)`;
 }
 
 function personalityKeywords(answers: Record<string, ParsedAnswer>): string[] {

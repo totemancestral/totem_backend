@@ -16,10 +16,14 @@ import { textPayloadSchema } from "./totem.schemas";
 import { allowedTotemAnimalNames, selectTotemAnimal, TotemAnimal } from "./totem-animals";
 import { normalizeTotemTitle } from "./totem-name";
 import {
+  AdultV3RecitResult,
   buildAdultV3Context,
   buildAdultV3FallbackPayload,
-  buildAdultV3GenerationPrompt,
-  normalizeAdultV3Response,
+  buildAdultV3ImagePrompt,
+  buildAdultV3Payload,
+  buildAdultV3RecitPrompt,
+  normalizeAdultV3ImageResult,
+  normalizeAdultV3RecitResult,
 } from "./totem-v3-pipeline";
 import {
   GeneratedArtefact,
@@ -114,6 +118,27 @@ export class TotemAiService {
 
   async generateText(payload: TextRequest): Promise<TotemTextPayload> {
     const context = buildAdultV3Context(payload);
+
+    let recit: AdultV3RecitResult;
+    try {
+      const content = await this.callAnthropic(buildAdultV3RecitPrompt(context));
+      recit = normalizeAdultV3RecitResult(parseJsonObject(content), context);
+    } catch {
+      return buildAdultV3FallbackPayload(context);
+    }
+
+    let imagePrompt: string;
+    try {
+      const content = await this.callAnthropic(buildAdultV3ImagePrompt(context, recit));
+      imagePrompt = normalizeAdultV3ImageResult(parseJsonObject(content), context).imagePrompt;
+    } catch {
+      imagePrompt = normalizeAdultV3ImageResult({}, context).imagePrompt;
+    }
+
+    return buildAdultV3Payload(recit, imagePrompt, context);
+  }
+
+  private async callAnthropic(prompt: string): Promise<string> {
     const response = await fetchWithTimeout(
       "https://api.anthropic.com/v1/messages",
       {
@@ -132,7 +157,7 @@ export class TotemAiService {
           messages: [
             {
               role: "user",
-              content: buildAdultV3GenerationPrompt(context),
+              content: prompt,
             },
           ],
         }),
@@ -142,17 +167,11 @@ export class TotemAiService {
 
     await assertOk(response, "anthropic_text");
     const json = anthropicResponseSchema.parse(await response.json());
-    const content = json.content
+    return json.content
       .map((block) => block.text)
       .filter((text): text is string => typeof text === "string" && text.length > 0)
       .join("\n")
       .trim();
-
-    try {
-      return normalizeAdultV3Response(parseJsonObject(content), context);
-    } catch {
-      return buildAdultV3FallbackPayload(context);
-    }
   }
 
   buildStoryPages(text: TotemTextPayload): TotemStoryPage[] {
