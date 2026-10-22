@@ -3,6 +3,7 @@ import {
   extractAdultAnswers,
   isCompleteAdultAnswers,
   normalizeAdultAnswers,
+  adultCheckoutAnswersSchema,
 } from "../src/totem/adult-answers";
 
 function answers() {
@@ -13,6 +14,23 @@ function answers() {
 }
 
 describe("adult answer contract", () => {
+  it("accepts four answers for payment but not for generation", () => {
+    const firstFour = answers().slice(0, 4);
+    expect(adultCheckoutAnswersSchema.safeParse(firstFour).success).toBe(true);
+    expect(isCompleteAdultAnswers({ answers: firstFour })).toBe(false);
+    expect(adultCheckoutAnswersSchema.safeParse(answers()).success).toBe(true);
+  });
+
+  it("does not count gender or duplicate answers towards the four-question gate", () => {
+    const firstThree = answers().slice(0, 3);
+    expect(adultCheckoutAnswersSchema.safeParse([...firstThree, { questionId: "sexe", answer: "femme" }]).success).toBe(false);
+    expect(adultCheckoutAnswersSchema.safeParse([...firstThree, firstThree[0]]).success).toBe(false);
+    expect(adultCheckoutAnswersSchema.safeParse([...firstThree, { questionId: "q5", answer: "A" }]).success).toBe(false);
+  });
+
+  it("requires an actual choice in the first four answers", () => {
+    expect(adultCheckoutAnswersSchema.safeParse(answers().slice(0, 4).map((a) => a.questionId === "q4" ? { ...a, answer: "free text only" } : a)).success).toBe(false);
+  });
   it("accepts a permutation and normalizes q1..q10", () => {
     const value = [...answers()].reverse();
     expect(normalizeAdultAnswers(value)?.map((answer) => answer.questionId)).toEqual(

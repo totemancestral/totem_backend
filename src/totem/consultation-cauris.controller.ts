@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Headers, Post } from "@nestjs/common";
+import { BadRequestException, Body, Controller, Get, Headers, Post, Query } from "@nestjs/common";
 import { z } from "zod";
 import { ConsultationCaurisService } from "./consultation-cauris.service";
 import { SupabaseAuthService } from "./supabase-auth.service";
@@ -25,6 +25,13 @@ export class ConsultationCaurisController {
     const user = await this.auth.requireUser(authorization);
     const payload = this.readBody(body);
     return this.consultations.tirer(user.id, payload.mood);
+  }
+
+  @Get("historique")
+  async historique(@Headers("authorization") authorization?: string, @Query("before") before?: string) {
+    const user = await this.auth.requireUser(authorization);
+    if (before && !/^\d{4}-\d{2}-\d{2}$/.test(before)) throw new BadRequestException("invalid_cursor");
+    return this.consultations.historique(user.id, before);
   }
 
   private readBody(body: unknown) {

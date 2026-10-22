@@ -1,4 +1,4 @@
-import { BadRequestException, HttpException, HttpStatus, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, HttpException, HttpStatus, Injectable, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma, TotemOrderStatus } from "@prisma/client";
 import Stripe from "stripe";
@@ -78,6 +78,7 @@ export class TotemOrdersService {
       id: order.id,
       offer: order.offer,
       paid: true,
+      requiresQuestionnaire: order.offer !== "junior" && !isCompleteAdultAnswers(order.answers),
       status: order.status,
       errorMessage: order.errorMessage ?? null,
       juniorPayload: order.offer === "junior" ? order.juniorPayload : null,
@@ -151,6 +152,13 @@ export class TotemOrdersService {
     if (!order) throw new BadRequestException("order_not_found");
     if (order.userId !== input.userId) throw new BadRequestException("order_user_mismatch");
 
+    if (order.offer === "junior") throw new BadRequestException("adult_order_required");
+    // Une répétition de la soumission ne doit ni modifier une œuvre en cours,
+    // ni remplacer les réponses d'une commande déjà mise en file.
+    if (order.queuedAt || order.status !== TotemOrderStatus.pending) {
+      return { orderId: order.id, queued: Boolean(order.queuedAt) };
+    }
+
     if (this.stripeSecretKey && order.checkoutSessionId && !order.paymentIntentId) {
       try {
         this.stripe ??= new Stripe(this.stripeSecretKey);
@@ -199,19 +207,22 @@ export class TotemOrdersService {
     status: TotemOrderStatus;
     checkoutSessionId: string | null;
   }): Promise<boolean> {
-    if (order.paymentIntentId) return true;
+    // L'existence d'un PaymentIntent ne signifie pas qu'il a été payé.
     if (order.queuedAt) return true;
     if (order.status === TotemOrderStatus.processing || order.status === TotemOrderStatus.done) {
       return true;
     }
-    if (!order.checkoutSessionId || !this.stripeSecretKey) return false;
+    if (!order.checkoutSessionId) return false;
+    if (!this.stripeSecretKey) throw new ServiceUnavailableException("payment_verification_unavailable");
 
     try {
       this.stripe ??= new Stripe(this.stripeSecretKey);
       const session = await this.stripe.checkout.sessions.retrieve(order.checkoutSessionId);
       return session.payment_status === "paid";
     } catch {
-      return false;
+      // Une panne de Stripe ne doit pas être interprétée comme un impayé,
+      // sous peine de proposer à nouveau le paiement d'une commande réglée.
+      throw new ServiceUnavailableException("payment_verification_unavailable");
     }
   }
 

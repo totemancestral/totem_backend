@@ -10,6 +10,7 @@
     "sourceMap": true,
     "outDir": "./dist",
     "baseUrl": "./",
+    "paths": { "@/*": ["../projet-totem-ancestral/*"] },
     "incremental": true,
     "strict": true,
     "skipLibCheck": true,

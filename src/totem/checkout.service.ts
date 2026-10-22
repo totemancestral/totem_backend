@@ -8,22 +8,14 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemOffer } from "./totem.types";
 import { juniorAnswersSchema } from "./junior-answers";
+import { adultCheckoutAnswersSchema } from "./adult-answers";
 import { OFFER_LABELS, TOTEM_PRICES_CENTS } from "./prices";
 
 const adultCheckoutSchema = z.object({
   offer: z.enum(["origine", "ancestral", "famille"]),
   externalCommandId: z.string().min(1).max(120).optional(),
-  answers: z
-    .array(
-      z.object({
-        questionId: z.string().min(1).max(80),
-        answer: z.string().min(1).max(4000),
-      }),
-    )
-      // Le sexe est un contexte hors questionnaire et peut porter le total a 11.
-      .min(4)
-      .max(11),
-    locale: z.string().min(2).max(12).optional(),
+  answers: adultCheckoutAnswersSchema,
+  locale: z.string().min(2).max(12).optional(),
   questionnaireVersion: z.string().min(1).max(32).optional(),
   indicators: z.record(z.string(), z.boolean()).optional(),
   customerName: z.string().min(1).max(120).optional(),

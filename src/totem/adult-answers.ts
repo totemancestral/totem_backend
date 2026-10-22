@@ -4,7 +4,7 @@ import type { QuestionnaireAnswer } from "./totem.types";
 const questionIds = ["q1", "q2", "q3", "q4", "q5", "q6", "q7", "q8", "q9", "q10"] as const;
 const questionIdSchema = z.enum(questionIds);
 const contextIdSchema = z.enum(["sexe"]);
-const choicePattern = /^[ABCD](?:\s*\|\s*.*)?$/i;
+const choicePattern = /^[ABCD](?:\s*\|\s*[\s\S]*)?$/i;
 
 export const adultAnswerSchema = z.object({
   questionId: questionIdSchema,
@@ -15,6 +15,22 @@ const contextAnswerSchema = z.object({
   questionId: contextIdSchema,
   answer: z.string().min(1).max(80),
 });
+
+// Le paiement ouvre la suite après quatre vraies réponses, hors contexte.
+// Les anciens clients qui envoient déjà les dix réponses restent compatibles.
+export const adultCheckoutAnswersSchema = z.array(z.union([adultAnswerSchema, contextAnswerSchema]))
+  .min(4).max(11).superRefine((answers, ctx) => {
+    const ids = answers.map((answer) => answer.questionId);
+    if (new Set(ids).size !== ids.length || !questionIds.slice(0, 4).every((id) => ids.includes(id))) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "checkout_requires_q1_to_q4_once" });
+    }
+    for (const { questionId, answer } of answers) {
+      if (questionId === "sexe" || (questionId === "q6" && answer.trim().toLowerCase() === "skipped")) continue;
+      if (!choicePattern.test(answer.trim())) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `${questionId}_must_start_with_choice` });
+      }
+    }
+  });
 
 export const adultAnswersSchema = z
   .array(z.union([adultAnswerSchema, contextAnswerSchema]))

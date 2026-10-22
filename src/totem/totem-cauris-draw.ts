@@ -86,6 +86,20 @@ export function caurisRestitution(draw: CaurisDraw, ancestralName: string) {
   };
 }
 
+// Reconstitue les anciennes lectures à partir de leurs codes enregistrés.
+export function restoreCaurisDraw(reading: CaurisPastReading & { serie: string }): CaurisDraw | null {
+  if (!(reading.serie in CAURIS_SERIES)) return null;
+  const serie = reading.serie as CaurisSerieId;
+  const text = (layer: CaurisCouche) => {
+    const values = CAURIS_SERIES[serie][LAYER_TEXT_KEY[layer]];
+    const index = values.findIndex((_, i) => caurisCode(serie, layer, i) === reading[LAYER_CODE_KEY[layer]]);
+    return index < 0 ? null : values[index]!;
+  };
+  const image = text("image"), parole = text("parole"), geste = text("geste");
+  if (image === null || parole === null || geste === null) return null;
+  return { ...reading, serie, image, parole, geste };
+}
+
 // Semaine calendaire (lundi 00:00 a dimanche 23:59, Europe/Paris) : deux tirages
 // de la meme semaine ont la meme cle, la semaine suivante en a une autre.
 export function parisWeekKey(date: Date): string {

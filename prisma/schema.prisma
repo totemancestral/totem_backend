@@ -143,12 +143,15 @@ model ConsultationReading {
   gesteCode   String
   mood        CaurisMood?
   weekKey     String
+  orderId     String?
+  ancestralName String?
+  readingPayload Json?
   createdAt   DateTime    @default(now())
 
   user UserProfile @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt])
-  @@index([userId, weekKey])
+  @@unique([userId, weekKey])
 }
 
 model TotemPipelineError {
