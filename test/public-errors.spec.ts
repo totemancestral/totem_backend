@@ -36,10 +36,12 @@ describe('public HTTP error boundary', () => {
     const response = { headersSent: false, setHeader: vi.fn((k, v) => { headers[k] = v; }), status: vi.fn().mockReturnThis(), json: vi.fn() };
     const host = { switchToHttp: () => ({ getResponse: () => response }) };
     new PublicErrorFilter().catch(new BadRequestException({ code: 'checkout_payload_invalid', detail: 'private-input' }), host as never);
-    const body = response.json.mock.calls[0][0];
+    const jsonCall = response.json.mock.calls[0];
+    if (!jsonCall) throw new Error('Expected an HTTP error response');
+    const body = jsonCall[0];
     expect(body).toMatchObject({ statusCode: 400, code: 'checkout_payload_invalid', message: 'checkout_payload_invalid', requestId: headers['X-Request-Id'] });
     expect(body.requestId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(log.mock.calls[0][0]).toMatchObject({ requestId: body.requestId, code: body.code });
+    expect(log.mock.calls[0]?.[0]).toMatchObject({ requestId: body.requestId, code: body.code });
     expect(JSON.stringify(body)).not.toContain('private-input');
     expect(JSON.stringify(log.mock.calls)).not.toContain('private-input');
   });
@@ -50,6 +52,6 @@ describe('public HTTP error boundary', () => {
     const response = { headersSent: false, setHeader: vi.fn(), status: vi.fn().mockReturnThis(), json: vi.fn() };
     new PublicErrorFilter().catch(error, { switchToHttp: () => ({ getResponse: () => response }) } as never);
     expect(JSON.stringify(log.mock.calls)).not.toContain('private-input');
-    expect(log.mock.calls[0][0]).toMatchObject({ frames: ['    at handler (/srv/handler.ts:12:3)'] });
+    expect(log.mock.calls[0]?.[0]).toMatchObject({ frames: ['    at handler (/srv/handler.ts:12:3)'] });
   });
 });
