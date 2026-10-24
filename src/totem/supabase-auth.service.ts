@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ForbiddenException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
@@ -64,10 +64,9 @@ export class SupabaseAuthService {
     try {
       return await fetchUser(this.supabaseUrl, this.supabaseAnonKey, token);
     } catch (e) {
-      const msg = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-      const stack = e instanceof Error ? e.stack || '' : '';
-      console.error(`[SupabaseAuthService] requireUser error: ${msg}\n${stack}`);
-      throw new UnauthorizedException(`auth_failed:${msg.slice(0, 120)}`);
+      // Preserve the cause for server-side diagnostics, never in the HTTP message.
+      if (e instanceof UnauthorizedException) throw new UnauthorizedException('auth_failed', { cause: e });
+      throw new ServiceUnavailableException('authentication_unavailable', { cause: e });
     }
   }
 
@@ -88,6 +87,18 @@ export class SupabaseAuthService {
     if (!role) {
       throw new ForbiddenException('admin_access_required');
     }
+
+    // requireUser a déjà fait valider ce même jeton par Supabase.
+    // Un facteur enregistré ne suffit pas : cette session doit être aal2.
+    const token = readBearerToken(authorization);
+    let aal: unknown;
+    try {
+      const payload = token.split('.')[1];
+      aal = payload ? JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')).aal : null;
+    } catch {
+      aal = null;
+    }
+    if (aal !== 'aal2') throw new UnauthorizedException('mfa_required');
 
     return user;
   }

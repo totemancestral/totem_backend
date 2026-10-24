@@ -15,23 +15,27 @@ export class ConsultationCaurisController {
   ) {}
 
   @Get("etat")
-  async etat(@Headers("authorization") authorization?: string) {
+  async etat(@Headers("authorization") authorization?: string, @Headers("accept-language") language?: string) {
     const user = await this.auth.requireUser(authorization);
-    return this.consultations.etat(user.id);
+    return this.consultations.etat(user.id, this.language(language));
   }
 
   @Post("tirer")
-  async tirer(@Body() body: unknown, @Headers("authorization") authorization?: string) {
+  async tirer(@Body() body: unknown, @Headers("authorization") authorization?: string, @Headers("accept-language") language?: string) {
     const user = await this.auth.requireUser(authorization);
     const payload = this.readBody(body);
-    return this.consultations.tirer(user.id, payload.mood);
+    return this.consultations.tirer(user.id, payload.mood, this.language(language));
   }
 
   @Get("historique")
-  async historique(@Headers("authorization") authorization?: string, @Query("before") before?: string) {
+  async historique(@Headers("authorization") authorization?: string, @Query("before") before?: string, @Headers("accept-language") language?: string) {
     const user = await this.auth.requireUser(authorization);
     if (before && !/^\d{4}-\d{2}-\d{2}$/.test(before)) throw new BadRequestException("invalid_cursor");
-    return this.consultations.historique(user.id, before);
+    return this.consultations.historique(user.id, before, this.language(language));
+  }
+
+  private language(value?: string): "fr" | "en" {
+    return /^en(?:[-,;]|$)/i.test(value?.trim() ?? "") ? "en" : "fr";
   }
 
   private readBody(body: unknown) {

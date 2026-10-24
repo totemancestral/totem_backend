@@ -7,7 +7,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemQueueService } from "./totem-queue.service";
 import { isCompleteAdultAnswers } from "./adult-answers";
-import { StripeWebhookService, hasEnoughAnswersForGeneration } from "./stripe-webhook.service";
+import { StripeWebhookService } from "./stripe-webhook.service";
 
 const completeOrderSchema = z.object({
   externalCommandId: z.string().uuid(),
@@ -80,13 +80,13 @@ export class TotemOrdersService {
       paid: true,
       requiresQuestionnaire: order.offer !== "junior" && !isCompleteAdultAnswers(order.answers),
       status: order.status,
-      errorMessage: order.errorMessage ?? null,
+      errorMessage: order.status === TotemOrderStatus.error ? "generation_failed" : null,
       juniorPayload: order.offer === "junior" ? order.juniorPayload : null,
       imageUrl: order.offer === "junior" ? order.imageUrl : null,
     };
   }
 
-  async retry(body: unknown): Promise<{ orderId: string; queued: boolean }> {
+  async retry(body: unknown): Promise<{ orderId: string; queued: boolean; outcome?: "already_done" | "already_running" }> {
     const payload = retryOrderSchema.parse(body);
 
     const command = await this.mirror.readCommandByExternalId(payload.externalCommandId);
@@ -107,17 +107,25 @@ export class TotemOrdersService {
     }
 
     if (order.status === TotemOrderStatus.done) {
-      return { orderId: order.id, queued: false };
+      return { orderId: order.id, queued: false, outcome: "already_done" };
+    }
+    if (order.status === TotemOrderStatus.processing) {
+      return { orderId: order.id, queued: true, outcome: "already_running" };
+    }
+    if (order.offer === "junior" || !isCompleteAdultAnswers(order.answers) || !await this.isPaid(order)) {
+      throw new BadRequestException("paid_complete_adult_order_required");
     }
 
-    await this.prisma.totemOrder.update({
-      where: { id: order.id },
+    const reserved = await this.prisma.totemOrder.updateMany({
+      where: { id: order.id, status: order.status, queuedAt: order.queuedAt },
       data: {
         status: TotemOrderStatus.pending,
         errorMessage: null,
-        attempts: 0,
+        ...(order.status === TotemOrderStatus.error ? { attempts: 0 } : {}),
+        queuedAt: new Date(),
       },
     });
+    if (!reserved.count) return { orderId: order.id, queued: true, outcome: "already_running" };
 
     await this.prisma.totemPipelineError.updateMany({
       where: { orderId: order.id, resolved: false },
@@ -126,11 +134,7 @@ export class TotemOrdersService {
 
     await this.mirror.markRetrying(command.id).catch(() => undefined);
 
-    await this.queue.enqueue(order.id, true);
-    await this.prisma.totemOrder.update({
-      where: { id: order.id },
-      data: { queuedAt: new Date() },
-    });
+    await this.queue.enqueue(order.id);
 
     return { orderId: order.id, queued: true };
   }
@@ -171,8 +175,9 @@ export class TotemOrdersService {
       }
     }
 
-    const updated = await this.prisma.totemOrder.update({
-      where: { id: order.id },
+    // Réserver les réponses et l'intention durable de génération dans une seule écriture.
+    const reserved = await this.prisma.totemOrder.updateMany({
+      where: { id: order.id, userId: input.userId, status: TotemOrderStatus.pending, queuedAt: null },
       data: {
         answers: {
           answers: payload.answers,
@@ -181,24 +186,18 @@ export class TotemOrdersService {
         } as unknown as Prisma.InputJsonValue,
         locale: payload.locale ?? order.locale,
         errorMessage: null,
+        queuedAt: new Date(),
       },
     });
 
-    if (updated.status !== TotemOrderStatus.pending || updated.queuedAt) {
-      return { orderId: updated.id, queued: Boolean(updated.queuedAt) };
+    if (reserved.count === 0) {
+      const current = await this.prisma.totemOrder.findUniqueOrThrow({ where: { id: order.id } });
+      return { orderId: order.id, queued: Boolean(current.queuedAt) };
     }
 
-    if (!hasEnoughAnswersForGeneration(updated.answers, order.offer)) {
-      throw new BadRequestException("answers_incomplete");
-    }
+    await this.queue.enqueue(order.id);
 
-    await this.queue.enqueue(updated.id);
-    await this.prisma.totemOrder.update({
-      where: { id: updated.id },
-      data: { queuedAt: new Date() },
-    });
-
-    return { orderId: updated.id, queued: true };
+    return { orderId: order.id, queued: true };
   }
 
   private async isPaid(order: {

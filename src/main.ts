@@ -24,7 +24,7 @@ async function bootstrap(): Promise<void> {
         .filter(Boolean),
       methods: ['GET', 'HEAD', 'POST', 'OPTIONS'],
       allowedHeaders: ['Authorization', 'Content-Type', 'Stripe-Signature'],
-      exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type'],
+      exposedHeaders: ['Content-Disposition', 'Content-Length', 'Content-Type', 'Retry-After'],
     });
   }
 

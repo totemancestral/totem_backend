@@ -14,9 +14,16 @@ const baseOrder = {
 };
 
 function setup(order: Omit<typeof baseOrder, "queuedAt"> & { queuedAt: Date | null } = baseOrder) {
+  const persisted = { ...order };
   const prisma = { totemOrder: {
-    findUnique: vi.fn().mockResolvedValue(order),
+    findUnique: vi.fn(async () => ({ ...persisted })),
+    findUniqueOrThrow: vi.fn(async () => ({ ...persisted })),
     update: vi.fn().mockImplementation(async ({ data }) => ({ ...order, ...data })),
+    updateMany: vi.fn(async ({ where, data }) => {
+      if (persisted.status !== where.status || persisted.queuedAt !== where.queuedAt) return { count: 0 };
+      Object.assign(persisted, data);
+      return { count: 1 };
+    }),
   } };
   const mirror = { readPaidCommand: vi.fn().mockResolvedValue({ id: "command-1", checkoutSessionId: "cs_test_1" }) };
   const queue = { enqueue: vi.fn().mockResolvedValue(undefined) };
@@ -25,7 +32,7 @@ function setup(order: Omit<typeof baseOrder, "queuedAt"> & { queuedAt: Date | nu
   const service = new TotemOrdersService(
     prisma as never, mirror as never, queue as never, webhook as never, config as never,
   );
-  return { service, prisma, mirror, queue, webhook };
+  return { service, prisma, mirror, queue, webhook, persisted };
 }
 
 beforeEach(() => { vi.clearAllMocks(); retrieve.mockResolvedValue({ payment_status: "paid" }); });
@@ -83,5 +90,28 @@ describe("adult payment boundary", () => {
     } });
     expect(queue.enqueue).not.toHaveBeenCalled();
     expect(prisma.totemOrder.update).not.toHaveBeenCalled();
+    expect(prisma.totemOrder.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("publishes only once for simultaneous final submissions and preserves the winning answers", async () => {
+    const s = setup();
+    const body = { externalCommandId: "00000000-0000-4000-8000-000000000001", answers: completeAnswers };
+    const results = await Promise.all([
+      s.service.completeAfterPayment({ userId: "user-1", body }),
+      s.service.completeAfterPayment({ userId: "user-1", body: { ...body, answers: completeAnswers.map((answer) => ({ ...answer, answer: "B" })) } }),
+    ]);
+    expect(results.every((result) => result.queued)).toBe(true);
+    expect(s.queue.enqueue).toHaveBeenCalledOnce();
+    expect(s.persisted.answers.answers).toEqual(completeAnswers);
+  });
+
+  it("keeps the durable generation request when Redis publication fails", async () => {
+    const s = setup();
+    s.queue.enqueue.mockRejectedValueOnce(new Error("redis_down"));
+    await expect(s.service.completeAfterPayment({ userId: "user-1", body: {
+      externalCommandId: "00000000-0000-4000-8000-000000000001", answers: completeAnswers,
+    } })).rejects.toThrow("redis_down");
+    expect(s.persisted.queuedAt).toBeInstanceOf(Date);
+    expect(s.persisted.answers.answers).toEqual(completeAnswers);
   });
 });

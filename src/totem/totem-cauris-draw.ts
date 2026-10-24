@@ -5,6 +5,7 @@ import {
   CaurisSerieId,
   caurisCode,
 } from "./totem-cauris";
+import { CAURIS_SERIES_EN } from "./totem-cauris.en";
 
 export const CAURIS_ANTI_REPEAT_WINDOW = 8;
 
@@ -87,11 +88,11 @@ export function caurisRestitution(draw: CaurisDraw, ancestralName: string) {
 }
 
 // Reconstitue les anciennes lectures à partir de leurs codes enregistrés.
-export function restoreCaurisDraw(reading: CaurisPastReading & { serie: string }): CaurisDraw | null {
-  if (!(reading.serie in CAURIS_SERIES)) return null;
+export function restoreCaurisDraw(reading: CaurisPastReading & { serie: string }, language: "fr" | "en" = "fr"): CaurisDraw | null {
+  if (!Object.hasOwn(CAURIS_SERIES, reading.serie)) return null;
   const serie = reading.serie as CaurisSerieId;
   const text = (layer: CaurisCouche) => {
-    const values = CAURIS_SERIES[serie][LAYER_TEXT_KEY[layer]];
+    const values = (language === "en" ? CAURIS_SERIES_EN : CAURIS_SERIES)[serie][LAYER_TEXT_KEY[layer]];
     const index = values.findIndex((_, i) => caurisCode(serie, layer, i) === reading[LAYER_CODE_KEY[layer]]);
     return index < 0 ? null : values[index]!;
   };

@@ -52,6 +52,7 @@ type AudioRequest = {
   orderId: string;
   archetypeId: string;
   text: string;
+  locale?: string | null;
 };
 
 type PdfRequest = {
@@ -266,7 +267,7 @@ export class TotemAiService {
           input: payload.text,
           voice_id: voiceId,
           output_format: "mp3_44100_128",
-          language_code: "fr",
+          language_code: payload.locale?.startsWith("en") ? "en" : "fr",
           stability: 0.35,
           similarity_boost: 0.85,
         }),
@@ -436,8 +437,9 @@ export class TotemAiService {
             model: this.openAiTtsModel,
             voice: this.openAiTtsVoice,
             input: chunks[index],
-            instructions:
-              "Voix grave, lente, chaleureuse et posée. Diction nette, articulation soignée, prononciation française naturelle, respirations courtes et pauses marquées après les phrases fortes. Laisser le silence porter le sens sans emphase ni effet théâtral.",
+            instructions: payload.locale?.startsWith("en")
+              ? "A deep, slow, warm and composed voice. Clear diction, careful articulation and natural English pronunciation. Short breaths and deliberate pauses after strong sentences. Let silence carry the meaning without emphasis or theatrical effects."
+              : "Voix grave, lente, chaleureuse et posée. Diction nette, articulation soignée, prononciation française naturelle, respirations courtes et pauses marquées après les phrases fortes. Laisser le silence porter le sens sans emphase ni effet théâtral.",
             response_format: "mp3",
           }),
         },
@@ -799,6 +801,7 @@ function pdfCopy(locale?: string | null): PdfCopy {
 
 async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  doc.setLanguage(payload.locale?.startsWith("en") ? "en" : "fr");
   doc.registerFontkit(fontkit);
   const width = 595;
   const height = 842;
@@ -839,6 +842,7 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
  */
 async function renderTotemCertificate(payload: PdfRequest): Promise<Uint8Array> {
   const doc = await PDFDocument.create();
+  doc.setLanguage(payload.locale?.startsWith("en") ? "en" : "fr");
   doc.registerFontkit(fontkit);
   const width = 595;
   const height = 842;

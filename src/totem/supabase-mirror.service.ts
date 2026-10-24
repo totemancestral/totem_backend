@@ -1,4 +1,4 @@
-import { Injectable } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { TotemOrder } from "@prisma/client";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
@@ -26,15 +26,27 @@ export class SupabaseMirrorService {
     userId: string;
     checkoutSessionId: string;
   }): Promise<void> {
-    if (!input.externalCommandId || !isUuid(input.externalCommandId)) return;
+    if (!input.externalCommandId) return;
+    await this.requireOwnedCommand(input.externalCommandId, input.userId);
+    await this.updateOwnedCommand(input.externalCommandId, input.userId, {
+      stripe_session_id: input.checkoutSessionId,
+    });
+  }
 
-    const { error } = await this.supabase
-      .from("commandes")
-      .update({ stripe_session_id: input.checkoutSessionId })
-      .eq("id", input.externalCommandId)
-      .eq("user_id", input.userId);
+  async requireOwnedCommand(commandId: string, userId: string): Promise<string> {
+    if (!isUuid(commandId)) throw new BadRequestException("external_command_invalid");
+    const { data, error } = await this.supabase.from("commandes").select("id")
+      .eq("id", commandId).eq("user_id", userId).maybeSingle();
+    if (error) throw new Error(`supabase_command_lookup_failed:${error.message}`);
+    if (!data?.id) throw new NotFoundException("commande_not_found");
+    return data.id as string;
+  }
 
-    if (error) throw new Error(`supabase_command_attach_failed:${error.message}`);
+  private async updateOwnedCommand(commandId: string, userId: string, patch: Record<string, unknown>): Promise<void> {
+    const { data, error } = await this.supabase.from("commandes").update(patch)
+      .eq("id", commandId).eq("user_id", userId).select("id").maybeSingle();
+    if (error) throw new Error(`supabase_command_update_failed:${error.message}`);
+    if (!data?.id) throw new NotFoundException("commande_not_found");
   }
 
   async markPaid(input: {
@@ -56,13 +68,13 @@ export class SupabaseMirrorService {
       langue: input.order.locale ?? "fr",
     };
 
-    let { error } = await this.supabase.from("commandes").update(patch).eq("id", commandId);
-    if (error && isMissingColumnError(error.message, "pays")) {
+    try {
+      await this.updateOwnedCommand(commandId, input.order.userId, patch);
+    } catch (error) {
+      if (!(error instanceof Error) || !isMissingColumnError(error.message, "pays")) throw error;
       delete patch.pays;
-      const retry = await this.supabase.from("commandes").update(patch).eq("id", commandId);
-      error = retry.error;
+      await this.updateOwnedCommand(commandId, input.order.userId, patch);
     }
-    if (error) throw new Error(`supabase_command_paid_failed:${error.message}`);
 
     return commandId;
   }
@@ -71,12 +83,7 @@ export class SupabaseMirrorService {
     const commandId = await this.findCommandId(order);
     if (!commandId) return;
 
-    const { error } = await this.supabase
-      .from("commandes")
-      .update({ statut: "en_generation" })
-      .eq("id", commandId);
-
-    if (error) throw new Error(`supabase_command_processing_failed:${error.message}`);
+    await this.updateOwnedCommand(commandId, order.userId, { statut: "en_generation" });
   }
 
   async markDelivered(input: {
@@ -144,11 +151,7 @@ export class SupabaseMirrorService {
       image: input.image,
     });
 
-    const { error } = await this.supabase
-      .from("commandes")
-      .update({ statut: "livree" })
-      .eq("id", commandId);
-    if (error) throw new Error(`supabase_command_delivered_failed:${error.message}`);
+    await this.updateOwnedCommand(commandId, input.order.userId, { statut: "livree" });
   }
 
   async markJuniorDelivered(input: {
@@ -211,10 +214,7 @@ export class SupabaseMirrorService {
       await this.insertOeuvre(oeuvre);
     }
 
-    await this.supabase
-      .from("commandes")
-      .update({ statut: "livree" })
-      .eq("id", commandId);
+    await this.updateOwnedCommand(commandId, input.order.userId, { statut: "livree" });
 
     // Delete any draft for this junior flow
     await this.supabase
@@ -227,7 +227,7 @@ export class SupabaseMirrorService {
   async markRetrying(commandId: string): Promise<void> {
     await this.supabase.from("commandes").update({ statut: "en_generation" }).eq("id", commandId);
     await this.supabase.from("oeuvres").update({ statut: "en_generation" }).eq("commande_id", commandId);
-    await this.supabase.from("erreurs_pipeline").delete().eq("commande_id", commandId);
+    // Keep previous failures as history; retrying does not erase their evidence.
   }
 
   async markFailed(order: TotemOrder | null, message: string): Promise<void> {
@@ -235,7 +235,7 @@ export class SupabaseMirrorService {
     const commandId = await this.findCommandId(order);
     if (!commandId) return;
 
-    await this.supabase.from("commandes").update({ statut: "erreur" }).eq("id", commandId);
+    await this.updateOwnedCommand(commandId, order.userId, { statut: "erreur" });
     await this.supabase.from("erreurs_pipeline").insert({
       commande_id: commandId,
       etape: "pipeline",
@@ -404,31 +404,26 @@ export class SupabaseMirrorService {
     order: TotemOrder,
     externalCommandId?: string,
   ): Promise<string | null> {
-    if (externalCommandId && isUuid(externalCommandId)) {
-      const { data, error } = await this.supabase
-        .from("commandes")
-        .select("id")
-        .eq("id", externalCommandId)
-        .maybeSingle();
-      if (error) throw new Error(`supabase_command_lookup_failed:${error.message}`);
-      if (data?.id) return data.id as string;
+    if (externalCommandId !== undefined) {
+      return this.requireOwnedCommand(externalCommandId, order.userId);
     }
 
-    const session = await this.findCommandByColumn("stripe_session_id", order.checkoutSessionId);
+    const session = await this.findCommandByColumn("stripe_session_id", order.checkoutSessionId, order.userId);
     if (session) return session;
 
     if (order.paymentIntentId) {
-      return this.findCommandByColumn("stripe_payment_intent_id", order.paymentIntentId);
+      return this.findCommandByColumn("stripe_payment_intent_id", order.paymentIntentId, order.userId);
     }
 
     return null;
   }
 
-  private async findCommandByColumn(column: string, value: string): Promise<string | null> {
+  private async findCommandByColumn(column: string, value: string, userId: string): Promise<string | null> {
     const { data, error } = await this.supabase
       .from("commandes")
       .select("id")
       .eq(column, value)
+      .eq("user_id", userId)
       .maybeSingle();
 
     if (error) throw new Error(`supabase_command_lookup_failed:${error.message}`);

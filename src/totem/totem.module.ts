@@ -1,4 +1,6 @@
 import { Module } from "@nestjs/common";
+import { APP_INTERCEPTOR } from "@nestjs/core";
+import { UserRateLimitInterceptor } from "./rate-limit.interceptor";
 import { HealthController, RootController } from "../health.controller";
 import { PrismaModule } from "../prisma/prisma.module";
 import { CheckoutController } from "./checkout.controller";
@@ -19,6 +21,7 @@ import { TotemOrdersController } from "./totem-orders.controller";
 import { TotemOrdersService } from "./totem-orders.service";
 import { TotemQueueService } from "./totem-queue.service";
 import { TotemWorker } from "./totem.worker";
+import { TotemAssetLinksService } from "./totem-asset-links.service";
 
 @Module({
   imports: [
@@ -35,6 +38,8 @@ import { TotemWorker } from "./totem.worker";
     HealthController,
   ],
   providers: [
+    { provide: APP_INTERCEPTOR, useClass: UserRateLimitInterceptor },
+    TotemAssetLinksService,
     CheckoutService,
     TotemOrdersService,
     StripeWebhookService,

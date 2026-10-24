@@ -1,6 +1,11 @@
 node_modules
 dist
-.env
+.env*
 .npm-cache
 coverage
 *.log
+.git
+*.pem
+*.key
+*.p12
+*.pfx

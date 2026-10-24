@@ -11,7 +11,7 @@ import { PrismaService } from "../prisma/prisma.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { SupabaseStorageService } from "./supabase-storage.service";
 import { TotemAiService } from "./totem-ai.service";
-import { TotemQueueService } from "./totem-queue.service";
+import { TotemQueueService, TOTEM_QUEUE_STALE_MS } from "./totem-queue.service";
 import {
   CheckoutSessionPayload,
   PaymentIntentPayload,
@@ -373,26 +373,31 @@ export class StripeWebhookService {
     if (order.offer === "junior") return;
     if (!hasEnoughAnswersForGeneration(order.answers, order.offer)) return;
 
-    await this.queue.enqueue(order.id);
-
-    await this.prisma.totemOrder.update({
-      where: { id: order.id },
+    const reserved = await this.prisma.totemOrder.updateMany({
+      where: { id: order.id, status: TotemOrderStatus.pending, queuedAt: null },
       data: { queuedAt: new Date() },
     });
+    if (reserved.count === 1) await this.queue.enqueue(order.id);
   }
 
   async computeJuniorRevealIfNeeded(orderId: string): Promise<void> {
     const order = await this.prisma.totemOrder.findUnique({ where: { id: orderId } });
     if (!order || order.offer !== "junior" || order.status === TotemOrderStatus.done) return;
 
-    await this.prisma.totemOrder.updateMany({
+    const processingAt = new Date();
+    const claimed = await this.prisma.totemOrder.updateMany({
       where: {
         id: orderId,
         offer: "junior",
-        status: { in: [TotemOrderStatus.pending, TotemOrderStatus.processing] },
+        OR: [
+          { status: TotemOrderStatus.pending },
+          { status: TotemOrderStatus.error },
+          { status: TotemOrderStatus.processing, processingAt: { lte: new Date(Date.now() - TOTEM_QUEUE_STALE_MS) } },
+        ],
       },
-      data: { status: TotemOrderStatus.processing, processingAt: new Date() },
+      data: { status: TotemOrderStatus.processing, processingAt },
     });
+    if (!claimed.count) return;
 
     const answers = normalizeJuniorAnswers(order.answers) ?? normalizeJuniorAnswers(order.juniorPayload) ?? {
       "1": { choice: "A" },
@@ -404,7 +409,7 @@ export class StripeWebhookService {
 
     try {
       const scores = computeScores(answers);
-      const reveal = computeReveal(answers);
+      const reveal = computeReveal(answers, undefined, order.locale);
 
       let imageKey: string | null = null;
       let imageUrl: string | null = null;
@@ -435,22 +440,8 @@ export class StripeWebhookService {
         },
       }).catch(() => undefined);
 
-      await this.prisma.juniorTotem.create({
-        data: {
-          userId: order.userId,
-          answers: answers as object,
-          scores,
-          dominant: reveal.dominant,
-          secondary: reveal.secondary,
-          totemName: reveal.name,
-          quality: reveal.quality,
-          phrase: reveal.phrase,
-          orderNumber: reveal.orderNumber,
-        },
-      }).catch(() => undefined);
-
-      await this.prisma.totemOrder.update({
-        where: { id: orderId },
+      const completed = await this.prisma.totemOrder.updateMany({
+        where: { id: orderId, status: TotemOrderStatus.processing, processingAt },
         data: {
           status: TotemOrderStatus.done,
           juniorPayload: {
@@ -473,6 +464,15 @@ export class StripeWebhookService {
           errorMessage: null,
         },
       });
+      if (!completed.count) return;
+
+      await this.prisma.juniorTotem.create({
+        data: {
+          userId: order.userId, answers: answers as object, scores,
+          dominant: reveal.dominant, secondary: reveal.secondary, totemName: reveal.name,
+          quality: reveal.quality, phrase: reveal.phrase, orderNumber: reveal.orderNumber,
+        },
+      }).catch(() => undefined);
 
       await this.mirror.markJuniorDelivered({
         order,
@@ -493,8 +493,8 @@ export class StripeWebhookService {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "junior_generation_failed";
-      await this.prisma.totemOrder.update({
-        where: { id: orderId },
+      await this.prisma.totemOrder.updateMany({
+        where: { id: orderId, status: TotemOrderStatus.processing, processingAt },
         data: {
           status: TotemOrderStatus.error,
           errorMessage,

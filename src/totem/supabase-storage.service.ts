@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { createHmac, timingSafeEqual } from 'crypto';
 import { Readable } from 'stream';
-import { SIGNED_URL_TTL_SECONDS } from './totem.constants';
+import { READ_SIGNED_URL_TTL_SECONDS, SIGNED_URL_TTL_SECONDS } from './totem.constants';
 import { GeneratedArtefact, StoredArtefact } from './totem.types';
 
 type SignedPayload = {
@@ -89,12 +89,32 @@ export class SupabaseStorageService {
     };
   }
 
-  signDeliveryUrl(key: string): string {
-    const exp = Math.floor(Date.now() / 1000) + SIGNED_URL_TTL_SECONDS;
+  signDeliveryUrl(key: string, ttlSeconds = SIGNED_URL_TTL_SECONDS): string {
+    const exp = Math.floor(Date.now() / 1000) + ttlSeconds;
     const payload = Buffer.from(JSON.stringify({ key, exp })).toString('base64url');
     const signature = this.sign(payload);
 
     return `${this.publicAssetBaseUrl}/totem-assets/${payload}.${signature}`;
+  }
+
+  /** À appeler seulement après contrôle du propriétaire de la commande en base. */
+  renewOwnedUrl(orderId: string, key: string | null, previousUrl: string | null): string | null {
+    let storedKey = key;
+    if (!storedKey && previousUrl) {
+      // Compatibilité avec les anciens enregistrements sans clé séparée.
+      // La signature reste obligatoire ; seule la date expirée peut être ignorée ici.
+      try {
+        const token = new URL(previousUrl).pathname.split('/totem-assets/')[1];
+        const [payload, signature, extra] = token?.split('.') ?? [];
+        if (payload && signature && !extra && this.hasValidSignature(payload, signature)) {
+          storedKey = readSignedPayload(payload).key;
+        }
+      } catch { /* Un ancien lien non signé ne donne aucun droit de renouvellement. */ }
+    }
+    const prefix = `orders/${orderId}/`;
+    if (!storedKey?.startsWith(prefix) || storedKey.slice(prefix.length).includes('/')
+      || storedKey.includes('..') || storedKey.includes('\\')) return null;
+    return this.signDeliveryUrl(storedKey, READ_SIGNED_URL_TTL_SECONDS);
   }
 
   private verifyToken(token: string): SignedPayload {

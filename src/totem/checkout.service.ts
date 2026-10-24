@@ -72,6 +72,9 @@ export class CheckoutService {
     email?: string;
   }): Promise<{ id: string; url: string | null }> {
     const payload = this.readInput(input.body);
+    if (payload.externalCommandId) {
+      await this.mirror.requireOwnedCommand(payload.externalCommandId, input.userId);
+    }
     const isJunior = payload.offer === "junior";
     const amount = isJunior ? TOTEM_PRICES_CENTS.junior : this.offerPrices[payload.offer];
 

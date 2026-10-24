@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Prisma } from "@prisma/client";
 import { ConsultationCaurisService } from "../src/totem/consultation-cauris.service";
 import { caurisSerieForArchetype, drawCauris, nextParisWeekStart, parisWeekKey, restoreCaurisDraw } from "../src/totem/totem-cauris-draw";
-import { CAURIS_SERIES } from "../src/totem/totem-cauris";
+import { CAURIS_SERIES, caurisCode, type CaurisSerieId } from "../src/totem/totem-cauris";
+import { CAURIS_SERIES_EN } from "../src/totem/totem-cauris.en";
 import { TOTEM_ANIMALS } from "../src/totem/totem-animals";
 
 const now = new Date("2026-10-22T12:00:00Z");
@@ -41,6 +42,39 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(now); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("weekly cauris service", () => {
+  it("switches language without drawing again, changing mood or changing weekly availability", async () => {
+    const { service, prisma, rows } = setup();
+    const first = await service.tirer("user-1", "en_doute", "en");
+    const french = await service.tirer("user-1", "en_combat", "fr");
+    const english = await service.tirer("user-1", undefined, "en");
+    expect(first.reading.language).toBe("en");
+    expect(french.reading).toMatchObject({ id: first.reading.id, weekKey: first.reading.weekKey, mood: "en_doute", language: "fr" });
+    expect(french.reading.image).not.toBe(first.reading.image);
+    expect(english.reading).toEqual(first.reading);
+    expect(english.nextAvailableAt).toBe(first.nextAvailableAt);
+    expect((await service.etat("user-1", "en")).currentReading).toEqual(first.reading);
+    expect((await service.historique("user-1", undefined, "en")).readings).toEqual([first.reading]);
+    expect(prisma.consultationReading.create).toHaveBeenCalledOnce();
+    expect(rows).toHaveLength(1);
+  });
+
+  it("translates legacy codes and preserves a saved English snapshot independently of the bank", async () => {
+    const { service } = setup([reading()]);
+    expect((await service.historique("user-1", undefined, "en")).readings[0]).toMatchObject({
+      language: "en", image: CAURIS_SERIES_EN.D2.images[0], parole: CAURIS_SERIES_EN.D2.paroles[0], geste: CAURIS_SERIES_EN.D2.gestes[0],
+    });
+    const saved = setup([{ ...reading(), imageCode: "unknown", readingPayload: {
+      image: "Image conservée", parole: "Parole conservée", geste: "Geste conservé",
+      en: { image: "Saved image", parole: "Saved words", geste: "Saved action" },
+    } }]);
+    expect((await saved.service.historique("user-1", undefined, "en")).readings[0]).toMatchObject({ language: "en", image: "Saved image" });
+    expect((await saved.service.historique("user-1")).readings[0]).toMatchObject({ language: "fr", image: "Image conservée" });
+  });
+
+  it("reports French honestly if a legacy reading has no resolvable translation", async () => {
+    const { service } = setup([{ ...reading(), imageCode: "unknown", readingPayload: { image: "Image", parole: "Parole", geste: "Geste" } }]);
+    expect((await service.historique("user-1", undefined, "en")).readings[0]).toMatchObject({ language: "fr", image: "Image" });
+  });
   it("only looks up the authenticated user's completed adult work", async () => {
     const { service, prisma } = setup();
     expect(await service.etat("user-1")).toMatchObject({ accessible: true, availableNow: true, currentReading: null });
@@ -110,6 +144,26 @@ describe("weekly cauris service", () => {
 });
 
 describe("cauris banks and calendar", () => {
+  it("resolves all 480 English entries with exactly the same saved codes as French", () => {
+    expect(Object.keys(CAURIS_SERIES_EN)).toEqual(Object.keys(CAURIS_SERIES));
+    for (const serie of Object.keys(CAURIS_SERIES) as CaurisSerieId[]) {
+      for (const layer of ["images", "paroles", "gestes"] as const) expect(CAURIS_SERIES_EN[serie][layer]).toHaveLength(20);
+      for (let index = 0; index < 20; index++) {
+        const codes = { serie, imageCode: caurisCode(serie, "image", index), paroleCode: caurisCode(serie, "parole", index), gesteCode: caurisCode(serie, "geste", index) };
+        const translated = restoreCaurisDraw(codes, "en")!;
+        const original = restoreCaurisDraw(codes)!;
+        for (const [key, layer] of [["image", "images"], ["parole", "paroles"], ["geste", "gestes"]] as const) {
+          expect(translated[key]).toBe(CAURIS_SERIES_EN[serie][layer][index]);
+          expect(translated[key].trim().length).toBeGreaterThan(10);
+          expect(translated[key]).not.toBe(original[key]);
+        }
+        expect(translated.imageCode).toBe(original.imageCode);
+        expect(translated.paroleCode).toBe(original.paroleCode);
+        expect(translated.gesteCode).toBe(original.gesteCode);
+      }
+    }
+    expect(restoreCaurisDraw({ serie: "__proto__", imageCode: "x", paroleCode: "x", gesteCode: "x" }, "en")).toBeNull();
+  });
   it("covers every adult archetype with 20 entries per layer", () => {
     for (const animal of TOTEM_ANIMALS) expect(caurisSerieForArchetype(animal.slug)).not.toBeNull();
     for (const bank of Object.values(CAURIS_SERIES)) for (const values of [bank.images, bank.paroles, bank.gestes]) expect(values).toHaveLength(20);

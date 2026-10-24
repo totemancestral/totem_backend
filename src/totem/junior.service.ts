@@ -3,12 +3,16 @@ import {
   ConflictException,
   Injectable,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import Stripe from 'stripe';
 import { z } from 'zod';
 import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseAuthService } from './supabase-auth.service';
 import { scoreJuniorFeta, type JuniorTotemId } from './feta-scoring';
 import { juniorAnswersSchema, juniorAnswersEqual } from './junior-answers';
+import { SupabaseStorageService } from './supabase-storage.service';
 
 type Dimension = 'F' | 'E' | 'T' | 'A';
 type Scores = Record<Dimension, number>;
@@ -67,9 +71,12 @@ const qualities: Record<string, string> = {
 
 @Injectable()
 export class JuniorService {
+  private stripe?: Stripe;
   constructor(
     private readonly prisma: PrismaService,
     private readonly auth: SupabaseAuthService,
+    private readonly storage: SupabaseStorageService,
+    private readonly config: ConfigService,
   ) {}
 
   async reveal(body: unknown, authorization?: string) {
@@ -86,9 +93,21 @@ export class JuniorService {
         offer: 'junior',
       },
     });
-    if (!order || !order.paymentIntentId) {
+    if (!order) {
       throw new ConflictException('junior_payment_not_confirmed');
     }
+    // Check the actual Checkout payment state, not the existence of an intent.
+    const secret = this.config.get<string>('STRIPE_SECRET_KEY');
+    if (!secret) throw new ServiceUnavailableException('payment_verification_unavailable');
+    let paid: boolean;
+    try {
+      this.stripe ??= new Stripe(secret);
+      const session = await this.stripe.checkout.sessions.retrieve(parsed.data.checkoutSessionId);
+      paid = session.payment_status === 'paid';
+    } catch {
+      throw new ServiceUnavailableException('payment_verification_unavailable');
+    }
+    if (!paid) throw new ConflictException('junior_payment_not_confirmed');
 
     const storedAnswers = juniorAnswersSchema.safeParse(order.answers);
     if (!storedAnswers.success) {
@@ -102,6 +121,7 @@ export class JuniorService {
     const { dominant, secondary, name, quality, orderNumber, phrase, share } = computeReveal(
       storedAnswers.data,
       parsed.data.firstName,
+      order.locale,
     );
 
     await this.prisma.userProfile.upsert({
@@ -129,8 +149,8 @@ export class JuniorService {
         secondary: existing.secondary,
         totem: { name: existing.totemName, quality: existing.quality },
         phrase: existing.phrase,
-        share: computeReveal(storedAnswers.data).share,
-        imageUrl: readImageUrl(order.juniorPayload),
+        share: computeReveal(storedAnswers.data, undefined, order.locale).share,
+        imageUrl: this.storage.renewOwnedUrl(order.id, order.imageKey, order.imageUrl ?? readImageUrl(order.juniorPayload)),
         saved: true,
       };
     }
@@ -160,7 +180,7 @@ export class JuniorService {
       totem: { name, quality },
       phrase,
       share,
-      imageUrl: readImageUrl(order.juniorPayload),
+      imageUrl: this.storage.renewOwnedUrl(order.id, order.imageKey, order.imageUrl ?? readImageUrl(order.juniorPayload)),
       saved: true,
     };
   }
@@ -243,12 +263,17 @@ export function computeScores(answers: Record<string, { choice: string }>): Scor
   return scoreJuniorFeta(answers).scores;
 }
 
-export function computeReveal(answers: Record<string, { choice: string }>, firstName?: string) {
+export function computeReveal(answers: Record<string, { choice: string }>, firstName?: string, locale?: string | null) {
   const scored = scoreJuniorFeta(answers);
-  const name = JUNIOR_TOTEM_NAMES[scored.totemId];
-  const quality = qualities[name] ?? 'Presence';
+  const isEn = locale === 'en';
+  const frenchName = JUNIOR_TOTEM_NAMES[scored.totemId];
+  const frenchQuality = qualities[frenchName] ?? 'Presence';
+  const name = isEn ? JUNIOR_NAMES_EN[scored.totemId] : frenchName;
+  const quality = isEn ? JUNIOR_QUALITIES_EN[frenchQuality] ?? frenchQuality : frenchQuality;
   const orderNumber = (hash(JSON.stringify(scored.scores)) % 999999) + 1;
-    const phrase = `Avant toi, un ancêtre portait ${qualityPhrase(quality)} dans son geste, et ce signe avance maintenant avec ton nom.`;
+  const phrase = isEn
+    ? `Before you, an ancestor carried ${quality.toLowerCase()} in their actions, and this sign now travels with your name.`
+    : `Avant toi, un ancêtre portait ${qualityPhrase(quality)} dans son geste, et ce signe avance maintenant avec ton nom.`;
 
   return {
     totemId: scored.totemId,
@@ -259,11 +284,25 @@ export function computeReveal(answers: Record<string, { choice: string }>, first
     orderNumber,
     phrase,
     share: {
-      caption: `${name}\nQuel ancetre dort en toi ?\n#RevealYourTotem`,
-      messageDefi: `J'ai découvert mon totem ancestral : ${name}. Toi, tu es quoi ? totem-ancestral.com`,
+      caption: `${name}\n${isEn ? 'Which ancestor sleeps within you?' : 'Quel ancetre dort en toi ?'}\n#RevealYourTotem`,
+      messageDefi: isEn ? `I discovered my ancestral totem: ${name}. What is yours? totem-ancestral.com` : `J'ai découvert mon totem ancestral : ${name}. Toi, tu es quoi ? totem-ancestral.com`,
     },
   };
 }
+
+const JUNIOR_NAMES_EN: Record<JuniorTotemId, string> = {
+  dayo_lion: 'DAYO THE LION OF FIRE', zara_leopard: 'ZARA THE LEOPARD OF SHADOWS',
+  kofi_buffle: 'KOFI THE BUFFALO OF THE PLAINS', amara_lionne: 'AMARA THE LIONESS OF THE SAVANNAS',
+  kemi_serpent: 'KEMI THE WISE SNAKE', bakari_crocodile: 'BAKARI THE ANCIENT CROCODILE',
+  aida_panthere: 'AIDA THE BLACK PANTHER', imani_tortue: 'IMANI THE ETERNAL TORTOISE',
+  seun_elephant: 'SEUN THE GUARDIAN ELEPHANT', nala_grue: 'NALA THE ROYAL CRANE',
+  kwame_aigle: 'KWAME THE EAGLE OF THE PEAKS', fatou_faucon: 'FATOU THE FREE FALCON',
+};
+const JUNIOR_QUALITIES_EN: Record<string, string> = {
+  Vision: 'Vision', Protection: 'Protection', Précision: 'Precision', Sagesse: 'Wisdom',
+  Mémoire: 'Memory', Mystère: 'Mystery', Endurance: 'Endurance', Grâce: 'Grace',
+  Longévité: 'Longevity', Liberté: 'Freedom', Intensité: 'Intensity', Patience: 'Patience', Presence: 'Presence',
+};
 
 function qualityPhrase(quality: string) {
   const phrases: Record<string, string> = {
