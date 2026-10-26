@@ -68,12 +68,21 @@ model JuniorTotem {
   @@index([userId, createdAt])
 }
 
+// One generation entitlement per authenticated beneficiary, shared by all offers.
+model TotemIdentity {
+  userId    String   @id
+  orderId   String   @unique
+  juniorId  String?  @unique
+  createdAt DateTime @default(now())
+}
+
 model TotemOrder {
   id                  String               @id @default(cuid())
   userId              String
   customerEmail       String?
   customerName        String?
   checkoutSessionId   String               @unique
+  checkoutExpiredAt   DateTime?
   paymentIntentId     String?              @unique
   status              TotemOrderStatus     @default(pending)
   locale              String?

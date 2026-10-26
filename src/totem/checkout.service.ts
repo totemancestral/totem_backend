@@ -10,6 +10,7 @@ import { TotemOffer } from "./totem.types";
 import { juniorAnswersSchema } from "./junior-answers";
 import { adultCheckoutAnswersSchema } from "./adult-answers";
 import { OFFER_LABELS, TOTEM_PRICES_CENTS } from "./prices";
+import { hasTotem, uniqueCheckout } from "./totem-uniqueness";
 
 const adultCheckoutSchema = z.object({
   offer: z.enum(["origine", "ancestral", "famille"]),
@@ -72,6 +73,28 @@ export class CheckoutService {
     email?: string;
   }): Promise<{ id: string; url: string | null }> {
     const payload = this.readInput(input.body);
+    if (payload.externalCommandId) await this.mirror.requireOwnedCommand(payload.externalCommandId, input.userId);
+    let createdSession: string | undefined;
+    try {
+      return await uniqueCheckout({
+        db: this.prisma, userId: input.userId, offer: payload.offer,
+        externalCommandId: payload.externalCommandId, stripe: this.readStripe(),
+        create: tx => this.createLockedSession(input, tx, id => { createdSession = id; }),
+        reuse: async session => ({ id: session.id, url: session.url }),
+      });
+    } catch (error) {
+      // A database failure must not leave a newly created payable orphan session.
+      if (createdSession) await this.readStripe().checkout.sessions.expire(createdSession).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async eligibility(userId: string) {
+    return { allowed: !await hasTotem(this.prisma, userId) };
+  }
+
+  private async createLockedSession(input: { body: unknown; userId: string; email?: string }, db: Prisma.TransactionClient, onCreated: (id: string) => void) {
+    const payload = this.readInput(input.body);
     if (payload.externalCommandId) {
       await this.mirror.requireOwnedCommand(payload.externalCommandId, input.userId);
     }
@@ -123,6 +146,7 @@ export class CheckoutService {
     }
 
     const session = await this.readStripe().checkout.sessions.create(sessionParams);
+    onCreated(session.id);
 
     if (payload.offer === "junior") {
       return this.createJuniorOrder({
@@ -133,10 +157,11 @@ export class CheckoutService {
         userId: input.userId,
         email: input.email,
         externalCommandId: payload.externalCommandId,
+        db,
       });
     }
 
-    const order = await this.prisma.totemOrder.create({
+    const order = await db.totemOrder.create({
       data: {
         id: orderId,
         userId: input.userId,
@@ -186,6 +211,7 @@ export class CheckoutService {
   }
 
   private async createJuniorOrder(input: {
+    db: Prisma.TransactionClient;
     orderId: string;
     payload: JuniorCheckoutInput;
     session: Stripe.Checkout.Session;
@@ -196,7 +222,7 @@ export class CheckoutService {
   }) {
     const { orderId, payload, session, amount, userId, email, externalCommandId } = input;
 
-    const order = await this.prisma.totemOrder.create({
+    const order = await input.db.totemOrder.create({
       data: {
         id: orderId,
         userId,
@@ -269,7 +295,7 @@ export class CheckoutService {
       throw new ServiceUnavailableException("stripe_not_configured");
     }
 
-    this.stripe ??= new Stripe(this.stripeSecretKey);
+    this.stripe ??= new Stripe(this.stripeSecretKey, { timeout: 8000, maxNetworkRetries: 0 });
     return this.stripe;
   }
 

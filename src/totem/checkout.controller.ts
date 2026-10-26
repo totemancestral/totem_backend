@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, Post } from '@nestjs/common';
+import { Body, Controller, Get, Header, Headers, Post } from '@nestjs/common';
 import { CheckoutService } from './checkout.service';
 import { SupabaseAuthService } from './supabase-auth.service';
 
@@ -8,6 +8,13 @@ export class CheckoutController {
     private readonly checkout: CheckoutService,
     private readonly auth: SupabaseAuthService,
   ) {}
+
+  @Get('eligibility')
+  @Header('Cache-Control', 'private, no-store')
+  async eligibility(@Headers('authorization') authorization?: string) {
+    const user = await this.auth.requireUser(authorization);
+    return this.checkout.eligibility(user.id);
+  }
 
   @Post()
   async create(

@@ -8,6 +8,7 @@ import { SupabaseMirrorService } from "./supabase-mirror.service";
 import { TotemQueueService } from "./totem-queue.service";
 import { isCompleteAdultAnswers } from "./adult-answers";
 import { StripeWebhookService } from "./stripe-webhook.service";
+import { claimTotem } from "./totem-uniqueness";
 
 const completeOrderSchema = z.object({
   externalCommandId: z.string().uuid(),
@@ -175,6 +176,7 @@ export class TotemOrdersService {
       }
     }
 
+    await claimTotem(this.prisma, input.userId, order.id);
     // Réserver les réponses et l'intention durable de génération dans une seule écriture.
     const reserved = await this.prisma.totemOrder.updateMany({
       where: { id: order.id, userId: input.userId, status: TotemOrderStatus.pending, queuedAt: null },

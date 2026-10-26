@@ -26,6 +26,7 @@ describe("delivery language", () => {
     expect(sent.html).toContain("Name &lt;unsafe&gt;");
     expect(sent.html).not.toContain("Name <unsafe>");
     expect(sent.html).toContain("30");
+    expect(sent.html).toContain(locale === "en" ? "Ancestral Parchment (PDF)" : "Parchemin ancestral (PDF)");
   });
   it("does not load the French stored template for an English delivery", async () => {
     mocks.template.mockClear().mockImplementation(async locale => ({ data: locale === "fr" ? { subject: "Ancien modèle français", html_content: "Français" } : null, error: null }));
@@ -39,6 +40,18 @@ describe("delivery language", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", fetchMock);
     await new ResendMailerService(config() as never).sendDelivery(delivery("en") as never);
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toMatchObject({ subject: "Ready test-order", html: expect.stringContaining("Name &lt;unsafe&gt;") });
+  });
+  it.each(["fr", "en"])("harmonizes legacy %s delivery templates before interpolation", async locale => {
+    const oldName = locale === "en" ? "Ancestral map" : "Carte ancestrale";
+    const newName = locale === "en" ? "Ancestral Parchment" : "Parchemin ancestral";
+    mocks.template.mockResolvedValue({ data: { subject: oldName, html_content: `<a href="{{pdfUrl}}">${oldName}</a>` }, error: null });
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", fetchMock);
+    await new ResendMailerService(config() as never).sendDelivery(delivery(locale) as never);
+    const sent = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    expect(sent.subject).toBe(newName);
+    expect(sent.html).toContain(newName);
+    expect(sent.html).not.toContain(oldName);
+    expect(sent.html).toContain("https://example.invalid/pdf");
   });
   it("keeps Junior scoring and identity codes stable while translating its delivery content", () => {
     const answers = Object.fromEntries(Array.from({ length: 5 }, (_, i) => [String(i + 1), { choice: "A" }]));
@@ -73,7 +86,13 @@ describe("PDF and narration language", () => {
       expect(pdf.catalog.lookup(PDFName.of("Lang"), PDFString).decodeText()).toBe(locale);
       expect(pdf.getPageCount()).toBeGreaterThan(0);
     }
-    expect(texts.join("\n")).toContain(locale === "en" ? "Prepared for Reader" : "Prepare pour Reader");
+    expect(texts.join("\n")).toContain(locale === "en" ? "Prepared for Reader" : "Préparé pour Reader");
+    if (locale === "fr") {
+      expect(texts.join("\n")).toContain("Décret royal de révélation symbolique");
+      expect(texts.join("\n")).toContain("RÉVÉLATION");
+      expect(texts.join("\n")).not.toContain("Prepare pour");
+      expect(texts.join("\n")).not.toContain("Decret royal");
+    }
     expect(texts.join("\n")).toContain(locale === "en" ? "Order: TEST" : "Commande: TEST");
     if (locale === "en") expect(texts.join("\n")).not.toContain("Commande:");
   }, 20_000);

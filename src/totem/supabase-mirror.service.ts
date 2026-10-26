@@ -3,6 +3,7 @@ import { ConfigService } from "@nestjs/config";
 import { TotemOrder } from "@prisma/client";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { StoredArtefact, TotemTextPayload } from "./totem.types";
+import { deliveredParchmentText } from "./parchment-text";
 
 @Injectable()
 export class SupabaseMirrorService {
@@ -432,9 +433,7 @@ export class SupabaseMirrorService {
 }
 
 function composeDeliveredStory(text: TotemTextPayload): string {
-  const pages = text.storyPages.map((page) => `${page.title}\n${page.text}`.trim()).filter(Boolean);
-
-  return [text.parchmentText, ...pages].filter(Boolean).join("\n\n");
+  return deliveredParchmentText(text);
 }
 
 function isUuid(value: string): boolean {

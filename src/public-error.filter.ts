@@ -16,6 +16,7 @@ const PUBLIC_CODES = new Set([
   'stripe_session_missing', 'checkout_session_mismatch', 'payment_intent_mismatch',
   'paid_complete_adult_order_required', 'adult_answers_incomplete', 'adult_order_required',
   'complete_order_payload_invalid', 'checkout_payload_invalid', 'asset_links_payload_invalid',
+  'totem_already_exists', 'totem_order_in_progress', 'totem_checkout_in_progress',
   'stripe_signature_missing', 'stripe_signature_invalid', 'stripe_event_invalid',
   'stripe_metadata_invalid', 'artefact_not_found', 'signed_url_invalid', 'signed_url_expired',
   'checkout_session_invalid', 'payment_intent_invalid', 'checkout_metadata_invalid',

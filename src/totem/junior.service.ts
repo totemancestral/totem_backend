@@ -12,6 +12,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { SupabaseAuthService } from './supabase-auth.service';
 import { scoreJuniorFeta, type JuniorTotemId } from './feta-scoring';
 import { juniorAnswersSchema, juniorAnswersEqual } from './junior-answers';
+import { claimTotem } from './totem-uniqueness';
 import { SupabaseStorageService } from './supabase-storage.service';
 
 type Dimension = 'F' | 'E' | 'T' | 'A';
@@ -155,6 +156,7 @@ export class JuniorService {
       };
     }
 
+    await claimTotem(this.prisma, user.id, order.id);
     const juniorTotem = await this.prisma.juniorTotem.create({
       data: {
         userId: user.id,
@@ -167,6 +169,12 @@ export class JuniorService {
         phrase,
         orderNumber,
       },
+    }).catch(async (error: unknown) => {
+      if (error && typeof error === "object" && "code" in error && error.code === "P2002") {
+        const saved = await this.prisma.juniorTotem.findFirst({ where: { userId: user.id, orderNumber } });
+        if (saved) return saved;
+      }
+      throw error;
     });
 
     return {

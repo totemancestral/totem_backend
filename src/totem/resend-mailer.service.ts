@@ -142,7 +142,12 @@ export class ResendMailerService {
     };
     const template = await this.readTemplate("delivery", locale);
 
-    if (template) return renderStoredTemplate(template, params);
+    if (template) {
+      const harmonize = (value: string) => value
+        .replace(/carte ancestrale/gi, "Parchemin ancestral")
+        .replace(/ancestral map|ancestral card/gi, "Ancestral Parchment");
+      return renderStoredTemplate({ subject: harmonize(template.subject), html_content: harmonize(template.html_content) }, params);
+    }
     return renderFallbackDelivery(payload, copy);
   }
 
@@ -234,7 +239,7 @@ function readDeliveryCopy(locale: "fr" | "en"): DeliveryCopy {
       linksIntro: "Your files are available here:",
       image: "Image",
       audio: "Audio",
-      pdf: "Ancestral map (PDF)",
+      pdf: "Ancestral Parchment (PDF)",
       certificate: "Certificate",
       signedNotice: "These signed links remain valid for 30 days.",
       fallbackName: "Your totem",
@@ -249,7 +254,7 @@ function readDeliveryCopy(locale: "fr" | "en"): DeliveryCopy {
     linksIntro: "Vos fichiers sont disponibles ici :",
     image: "Image",
     audio: "Audio",
-    pdf: "Carte ancestrale (PDF)",
+    pdf: "Parchemin ancestral (PDF)",
     certificate: "Certificat",
     signedNotice: "Ces liens signés restent valides pendant 30 jours.",
     fallbackName: "Votre totem",

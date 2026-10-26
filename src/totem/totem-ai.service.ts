@@ -779,7 +779,7 @@ function pdfCopy(locale?: string | null): PdfCopy {
       holderFallback: "A personal and unique work",
       offer: "Offer",
       order: "Order",
-      story: "THE STORY",
+      story: "THE ANCESTRAL PARCHMENT",
       page: "Page",
       insignia: "INSIGNIA",
       offers: { origine: "ORIGIN", ancestral: "REVELATION", famille: "FAMILY", junior: "JUNIOR" },
@@ -787,15 +787,15 @@ function pdfCopy(locale?: string | null): PdfCopy {
   }
 
   return {
-    subtitle: "Decret royal de revelation symbolique",
-    holder: (name) => `Prepare pour ${name}`,
-    holderFallback: "Oeuvre personnelle et unique",
+    subtitle: "Décret royal de révélation symbolique",
+    holder: (name) => `Préparé pour ${name}`,
+    holderFallback: "Œuvre personnelle et unique",
     offer: "Offre",
     order: "Commande",
-    story: "LE RECIT",
+    story: "LE PARCHEMIN ANCESTRAL",
     page: "Page",
     insignia: "INSIGNE",
-    offers: { origine: "ORIGINE", ancestral: "REVELATION", famille: "FAMILLE", junior: "JUNIOR" },
+    offers: { origine: "ORIGINE", ancestral: "RÉVÉLATION", famille: "FAMILLE", junior: "JUNIOR" },
   };
 }
 
@@ -837,7 +837,7 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
  * Le certificat autonome : un document d'une page reprenant exactement la
  * couverture du classeur complet (titre, image, nom ancestral, destinataire,
  * sceau de cire, offre, numero de commande). Genere separement du parchemin
- * (renderTotemPdf) afin que "Carte ancestrale" et "Certificat" soient deux
+ * (renderTotemPdf) afin que "Parchemin ancestral" et "Certificat" soient deux
  * fichiers reellement distincts.
  */
 async function renderTotemCertificate(payload: PdfRequest): Promise<Uint8Array> {

@@ -15,7 +15,7 @@ const baseOrder = {
 
 function setup(order: Omit<typeof baseOrder, "queuedAt"> & { queuedAt: Date | null } = baseOrder) {
   const persisted = { ...order };
-  const prisma = { totemOrder: {
+  const prisma = { $executeRaw: vi.fn().mockResolvedValue(1), $queryRaw: vi.fn().mockResolvedValue([{ orderId: order.id }]), totemOrder: {
     findUnique: vi.fn(async () => ({ ...persisted })),
     findUniqueOrThrow: vi.fn(async () => ({ ...persisted })),
     update: vi.fn().mockImplementation(async ({ data }) => ({ ...order, ...data })),
