@@ -45,7 +45,7 @@ export type AdultV3Context = {
   visualFrame: 1 | 2 | 3 | 4 | 5;
   /**
    * Sexe declare par le client. Unique variable de genre : elle accorde le
-   * recit sur l'ancetre et l'adresse au client (« Cher Fils », « Chere Fille »).
+   * recit sur l'ancetre et l'adresse au client (« Cher fils », « Chère fille »).
    */
   gender: Gender;
   imagePrompt: string;
@@ -66,7 +66,7 @@ export type Gender = "homme" | "femme" | null;
  *
  * Une seule variable, declaree par le client, pilote les deux accords du
  * texte : celui qui porte sur l'ancetre (il / elle) et celui qui porte sur le
- * client lui-meme (« Cher Fils » / « Chere Fille »). L'ancetre se leve a
+ * client lui-meme (« Cher fils » / « Chère fille »). L'ancetre se leve a
  * l'image de la personne, les deux accords sont donc identiques par
  * construction. Le sexe ne touche jamais l'archetype, l'animal ni le clan, qui
  * restent determines par les scores FETA.
@@ -77,13 +77,13 @@ function genderPromptLine(gender: Gender, firstName: string): string {
 
   if (gender === "homme") {
     return (
-      `MASCULIN. Le client est un homme, et l'ancetre se leve a son image : accorde tout le recit au masculin (il, cet homme, le pere, l'aieul), sans formulation neutre ou ambigue. Quand l'ancetre s'adresse au client, il dit « Cher Fils ${firstName} », ou simplement « mon fils », jamais une formule neutre.` +
+      `MASCULIN. Le client est un homme, et l'ancetre se leve a son image : accorde tout le recit au masculin (il, cet homme, le pere, l'aieul), sans formulation neutre ou ambigue. Quand l'ancetre s'adresse au client, il dit « Cher fils ${firstName} », ou simplement « mon fils », jamais une formule neutre.` +
       rule
     );
   }
   if (gender === "femme") {
     return (
-      `FEMININ. La cliente est une femme, et l'ancetre se leve a son image : accorde tout le recit au feminin (elle, cette femme, la mere, l'aieule), sans formulation neutre ou ambigue. Quand l'ancetre s'adresse a la cliente, il dit « Chere Fille ${firstName} », ou simplement « ma fille », jamais une formule neutre.` +
+      `FEMININ. La cliente est une femme, et l'ancetre se leve a son image : accorde tout le recit au feminin (elle, cette femme, la mere, l'aieule), sans formulation neutre ou ambigue. Quand l'ancetre s'adresse a la cliente, il dit « Chère fille ${firstName} », ou simplement « ma fille », jamais une formule neutre.` +
       rule
     );
   }
@@ -91,6 +91,14 @@ function genderPromptLine(gender: Gender, firstName: string): string {
     "NON DECLARE. Garde des formulations qui fonctionnent pour un homme comme pour une femme, et adresse-toi au client sans marque de genre." +
     rule
   );
+}
+
+/** Correct only the direct client salutation, never names or narrative pronouns. */
+export function correctClientSalutation(text: string, context: Pick<AdultV3Context, "gender" | "language">): string {
+  const address = context.language === "fr"
+    ? (context.gender === "femme" ? "Ch\u00e8re fille" : context.gender === "homme" ? "Cher fils" : "")
+    : (context.gender === "femme" ? "Dear daughter" : context.gender === "homme" ? "Dear son" : "Dear");
+  return text.normalize("NFC").replace(/\b(?:ch[e\u00e8]re?\s+(?:fils|fille)|dear\s+(?:son|daughter))\b\s*/gi, address ? `${address} ` : "");
 }
 
 function readGender(answers: QuestionnaireAnswer[]): Gender {
@@ -651,8 +659,9 @@ MISSION :
 REGLES STRICTES :
 - Ne jamais presenter l'oeuvre comme une verite ethnique, historique ou scientifique. C'est une fable artistique, non une genealogie, une divination ou une preuve.
 - Conditionnel doux pour l'ancetre : "il aurait vecu", jamais "tu es" pour l'ancetre.
-- ADRESSE AU CLIENT : lorsque l'ancetre parle a ${context.firstName}, il l'appelle « Cher Fils ${context.firstName} » ou « Chere Fille ${context.firstName} » selon le genre declare plus haut, jamais une formule neutre. Le meme genre commande l'accord du recit sur l'ancetre : les deux sont identiques.
+- ADRESSE AU CLIENT : lorsque l'ancetre parle a ${context.firstName}, il l'appelle « Cher fils ${context.firstName} » ou « Chère fille ${context.firstName} » selon le genre déclaré plus haut ; si le genre est absent, utilise uniquement le prénom, sans fils ni fille. Le meme genre commande l'accord du recit sur l'ancetre : les deux sont identiques.
 - Pas d'emojis, pas de texte marketing, pas de cliches, pas de nom de divinite, de priere, de rituel ou de formule sacree.
+- Respecte tous les accents français, y compris sur les majuscules (À, É, È), les cédilles et les ligatures. Relis chaque phrase avant de retourner le JSON.
 - Ecris une prose francaise relue : accords, orthographe, ponctuation, enchainements logiques et vocabulaire precis. Le texte doit rester humain, sobre et singulier, sans marqueur de generation automatique.
 - PONCTUATION : n'utilise JAMAIS de tiret (-) ni de tiret cadratin (—) pour separer des mots, des idees ou des phrases, ni comme incise, ni devant un numero. Emploie uniquement une ponctuation francaise correcte : virgule, point, deux-points, point-virgule, parentheses. Le tiret n'est admis qu'a l'interieur d'un mot compose (« sous-bois », « au-dela »).
 
@@ -745,8 +754,8 @@ export function normalizeAdultV3RecitResult(
   const a5 = readRecord(root.a5) ?? {};
   const candidateName = readString(a1.nom_complet);
   const ancestralName = isCanonicalTotemName(candidateName) ? candidateName : context.nomComplet;
-  const parchmentText = readString(a2.parchment_text) || buildFallbackParchment(context);
-  const movementTexts = extractMovementTexts(a2, parchmentText);
+  const parchmentText = correctClientSalutation(readString(a2.parchment_text) || buildFallbackParchment(context), context);
+  const movementTexts = extractMovementTexts(a2, parchmentText).map(text => correctClientSalutation(text, context));
 
   return {
     archetypeId: context.archetype.id,
@@ -913,7 +922,7 @@ function extractMovementTexts(a2: Record<string, unknown>, parchmentText: string
 }
 
 function buildStoryPagesFromMovements(movementTexts: string[], imagePrompt: string): TotemStoryPage[] {
-  const titles = ["L'Ouverture", "Le Portrait", "L'Epreuve", "La Transmission", "Le Passage"];
+  const titles = ["L'Ouverture", "Le Portrait", "L'Épreuve", "La Transmission", "Le Passage"];
 
   return movementTexts.slice(0, 5).map((text, index) => ({
     page: index + 1,
@@ -945,10 +954,10 @@ function buildFallbackParchment(context: AdultV3Context): string {
   }
 
   return [
-    `A l'heure du ${context.hour}, une figure du ${context.archetype.french} aurait veille pres d'un seuil ancien de ${context.archetype.region}.`,
+    `À l'heure du ${context.hour}, une figure du ${context.archetype.french} aurait veillé près d'un seuil ancien de ${context.archetype.region}.`,
     `${context.nomComplet} porte un signe discret : ${context.archetype.quality.toLowerCase()}, tenu sans fracas et offert lorsque le chemin l'exige.`,
-    `Un ancetre imagine aurait appris a garder le passage, a lire l'heure juste, et a faire du silence une force attentive.`,
-    `${context.firstName}, recois ceci comme une oeuvre : un nom, un passage, et une lampe posee devant le prochain pas.`,
+    `Un ancêtre imaginé aurait appris à garder le passage, à lire l'heure juste, et à faire du silence une force attentive.`,
+    `${context.firstName}, reçois ceci comme une œuvre : un nom, un passage, et une lampe posée devant le prochain pas.`,
   ].join("\n\n");
 }
 
