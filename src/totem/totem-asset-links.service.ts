@@ -2,6 +2,7 @@ import { BadRequestException, Injectable } from "@nestjs/common";
 import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { SupabaseStorageService } from "./supabase-storage.service";
+import { adultIdentityFor } from "./adult-identity";
 
 const inputSchema = z.object({ sessionIds: z.array(z.string().min(1).max(255)).min(1).max(100) }).strict();
 
@@ -20,10 +21,12 @@ export class TotemAssetLinksService {
         audioKey: true, audioUrl: true, pdfKey: true, pdfUrl: true,
         certificateKey: true, certificateUrl: true,
         parchmentKey: true, parchmentUrl: true,
+        offer: true, archetypeId: true, locale: true,
       },
     });
     return orders.map((order) => ({
       sessionId: order.checkoutSessionId,
+      adult_identity: order.offer === "junior" ? null : adultIdentityFor(order.archetypeId, order.locale),
       image_url: this.storage.renewOwnedUrl(order.id, order.imageKey, order.imageUrl),
       audio_url: this.storage.renewOwnedUrl(order.id, order.audioKey, order.audioUrl),
       pdf_url: this.storage.renewOwnedUrl(order.id, order.pdfKey ?? order.parchmentKey, order.pdfUrl ?? order.parchmentUrl),

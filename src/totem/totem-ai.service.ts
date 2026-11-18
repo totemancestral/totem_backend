@@ -15,6 +15,7 @@ import { z } from "zod";
 import { textPayloadSchema } from "./totem.schemas";
 import { allowedTotemAnimalNames, selectTotemAnimal, TotemAnimal } from "./totem-animals";
 import { normalizeTotemTitle } from "./totem-name";
+import { adultIdentityFor, type AdultIdentity } from "./adult-identity";
 import {
   AdultV3RecitResult,
   buildAdultV3Context,
@@ -509,7 +510,7 @@ Reponds uniquement avec un objet JSON valide, sans Markdown, sans commentaire, a
 {
   "archetypeId": "${selectedAnimal?.slug ?? "slug-court-en-minuscules"}",
   "ancestralName": "Nom ancestral compose unique au format [Prenom A]-[Prenom B], [Titre poetique]",
-  "parchmentText": "Parchemin Ancestral de 1500 a 1800 caracteres, 5 mouvements separes par doubles sauts de ligne",
+  "parchmentText": "Histoire ancestrale de la Carte ancestrale, 1500 a 1800 caracteres, 5 mouvements separes par doubles sauts de ligne",
   "audioMessage": "Script audio de 130 a 160 mots, pret pour voix synthetique",
   "imagePrompt": "Prompt image Ngil detaille, sans texte dans l'image",
   "storyPages": [
@@ -755,6 +756,8 @@ async function mapWithConcurrency<T, R>(
 }
 
 type PdfCopy = {
+  card: string;
+  certificate: string;
   subtitle: string;
   holder: (name: string) => string;
   holderFallback: string;
@@ -774,12 +777,14 @@ type PdfCopy = {
 function pdfCopy(locale?: string | null): PdfCopy {
   if (locale?.startsWith("en")) {
     return {
+      card: "ANCESTRAL CARD",
+      certificate: "CERTIFICATE OF AUTHENTICITY",
       subtitle: "Royal decree of symbolic revelation",
       holder: (name) => `Prepared for ${name}`,
       holderFallback: "A personal and unique work",
       offer: "Offer",
       order: "Order",
-      story: "THE ANCESTRAL PARCHMENT",
+      story: "ANCESTRAL STORY",
       page: "Page",
       insignia: "INSIGNIA",
       offers: { origine: "ORIGIN", ancestral: "REVELATION", famille: "FAMILY", junior: "JUNIOR" },
@@ -787,12 +792,14 @@ function pdfCopy(locale?: string | null): PdfCopy {
   }
 
   return {
+    card: "CARTE ANCESTRALE",
+    certificate: "CERTIFICAT D’AUTHENTICITÉ",
     subtitle: "Décret royal de révélation symbolique",
     holder: (name) => `Préparé pour ${name}`,
     holderFallback: "Œuvre personnelle et unique",
     offer: "Offre",
     order: "Commande",
-    story: "LE PARCHEMIN ANCESTRAL",
+    story: "HISTOIRE ANCESTRALE",
     page: "Page",
     insignia: "INSIGNE",
     offers: { origine: "ORIGINE", ancestral: "RÉVÉLATION", famille: "FAMILLE", junior: "JUNIOR" },
@@ -811,14 +818,20 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   const manuscriptFont = await loadManuscriptFont(doc);
 
   const copy = pdfCopy(payload.locale);
+  doc.setTitle(copy.card);
   const parchment = await loadParchmentBackground(doc);
 
   // PAGE 1 : la couverture, identique au certificat autonome (cf.
   // drawCertificateCover) — reprise ici pour garder le classeur complet en
   // un seul document.
-  await drawCertificateCover(doc, payload, { width, height, titleFont, bodyFont, italicFont, manuscriptFont, copy, parchment });
+  await drawCertificateCover(doc, payload, { width, height, titleFont, bodyFont, italicFont, manuscriptFont, copy, parchment, documentLabel: copy.card });
 
-  // PAGE 2 : le recit complet, sans titres de mouvements.
+  const identity = payload.text.adultIdentity ?? adultIdentityFor(payload.text.archetypeId, payload.locale);
+  if (payload.offer !== "junior" && identity) {
+    drawAdultIdentityPage(doc, identity, { width, height, titleFont, bodyFont, parchment, locale: payload.locale });
+  }
+
+  // The complete story follows the identity, without changing its contents.
   drawParchmentStory(doc, {
     width,
     height,
@@ -831,6 +844,34 @@ async function renderTotemPdf(payload: PdfRequest): Promise<Uint8Array> {
   });
 
   return doc.save();
+}
+
+function drawAdultIdentityPage(doc: PDFDocument, identity: AdultIdentity, input: {
+  width: number; height: number; titleFont: PDFFont; bodyFont: PDFFont;
+  parchment: PDFImage | null; locale?: string | null;
+}) {
+  const page = doc.addPage([input.width, input.height]);
+  drawRoyalParchment(page, input.width, input.height, input.parchment);
+  const box = parchmentContentBox(input.width, input.height);
+  const en = input.locale?.startsWith("en");
+  let y = box.y + box.height - 32;
+  drawCentered(page, input.titleFont, en ? "YOUR ANCESTRAL IDENTITY" : "VOTRE IDENTITÉ ANCESTRALE", 20, y, input.width, pdfColor("ink"));
+  y -= 58;
+  const fields = [
+    [en ? "Your totem animal" : "Votre animal totem", identity.animal],
+    [en ? "Your main quality" : "Votre qualité principale", identity.quality],
+    [en ? "Your identity phrase" : "Votre phrase identitaire", identity.identityPhrase],
+    [en ? "Your secondary attributes" : "Vos attributs secondaires", identity.secondaryAttributes.join(" / ")],
+  ];
+  for (const [label, value] of fields) {
+    page.drawText(label!, { x: box.x, y, font: input.titleFont, size: 12, color: pdfColor("goldDark") });
+    y -= 24;
+    for (const line of wrapPdfText(value!, input.bodyFont, 16, box.width, false)) {
+      page.drawText(line, { x: box.x, y, font: input.bodyFont, size: 16, color: pdfColor("ink") });
+      y -= 24;
+    }
+    y -= 30;
+  }
 }
 
 /**
@@ -852,9 +893,10 @@ async function renderTotemCertificate(payload: PdfRequest): Promise<Uint8Array> 
   const manuscriptFont = await loadManuscriptFont(doc);
 
   const copy = pdfCopy(payload.locale);
+  doc.setTitle(copy.certificate);
   const parchment = await loadParchmentBackground(doc);
 
-  await drawCertificateCover(doc, payload, { width, height, titleFont, bodyFont, italicFont, manuscriptFont, copy, parchment });
+  await drawCertificateCover(doc, payload, { width, height, titleFont, bodyFont, italicFont, manuscriptFont, copy, parchment, documentLabel: copy.certificate });
 
   return doc.save();
 }
@@ -872,6 +914,7 @@ async function drawCertificateCover(
     italicFont: PDFFont;
     manuscriptFont: PDFFont | null;
     copy: ReturnType<typeof pdfCopy>;
+    documentLabel: string;
     parchment: Awaited<ReturnType<typeof loadParchmentBackground>>;
   },
 ): Promise<void> {
@@ -900,6 +943,7 @@ async function drawCertificateCover(
     pdfColor("soft"),
   );
   drawGoldRule(firstPage, width / 2, coverTop - ref(88, width), ref(120, width));
+  drawCentered(firstPage, bodyFont, fonts.documentLabel, ref(12, width), coverTop - ref(106, width), width, pdfColor("goldDark"));
 
   let titleY = coverTop - ref(230, width);
   const coverImage = await embedPdfImage(doc, payload.image);

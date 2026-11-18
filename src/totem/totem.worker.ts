@@ -208,8 +208,7 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
       image: imageArtefact,
     };
 
-    // La voix ritualisee est reservee aux offres Ancestral/Revelation et
-    // Famille ; l'offre Origine ne la promet pas (cf. Offres.tsx).
+    // Révélation includes narration; historical Famille orders keep their delivery.
     const includeAudio = order.offer !== "origine";
 
     const [audio, pdf, certificate] = await Promise.all([

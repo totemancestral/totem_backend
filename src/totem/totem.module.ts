@@ -22,6 +22,8 @@ import { TotemOrdersService } from "./totem-orders.service";
 import { TotemQueueService } from "./totem-queue.service";
 import { TotemWorker } from "./totem.worker";
 import { TotemAssetLinksService } from "./totem-asset-links.service";
+import { ParentConsentController } from "./parent-consent.controller";
+import { ParentConsentService } from "./parent-consent.service";
 
 @Module({
   imports: [
@@ -34,6 +36,7 @@ import { TotemAssetLinksService } from "./totem-asset-links.service";
     StripeWebhookController,
     TotemAssetsController,
     JuniorController,
+    ParentConsentController,
     ConsultationCaurisController,
     HealthController,
   ],
@@ -51,6 +54,7 @@ import { TotemAssetLinksService } from "./totem-asset-links.service";
     SupabaseAuthService,
     SupabaseMirrorService,
     JuniorService,
+    ParentConsentService,
     ConsultationCaurisService,
   ],
 })

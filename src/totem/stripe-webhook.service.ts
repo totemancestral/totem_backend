@@ -24,6 +24,10 @@ import { computeScores, computeReveal, JUNIOR_TOTEM_ANIMALS } from "./junior.ser
 import { isCompleteAdultAnswers } from "./adult-answers";
 import { isCompleteJuniorAnswers, normalizeJuniorAnswers } from "./junior-answers";
 import { ResendMailerService } from "./resend-mailer.service";
+import { generateJuniorDocuments } from "./junior-documents";
+import { juniorSerialNumber } from "./junior-content";
+import type { GeneratedArtefact, StoredArtefact } from "./totem.types";
+import type { TotemOrder } from "@prisma/client";
 
 @Injectable()
 export class StripeWebhookService {
@@ -109,8 +113,6 @@ export class StripeWebhookService {
       customerName: metadata.prenom ?? session.customer_details?.name ?? undefined,
     });
 
-    await this.computeJuniorRevealIfNeeded(order.id);
-
     await this.mirror.markPaid({
       order,
       externalCommandId: metadata.externalCommandId,
@@ -120,6 +122,7 @@ export class StripeWebhookService {
       country: session.customer_details?.address?.country ?? undefined,
     });
 
+    await this.computeJuniorRevealIfNeeded(order.id);
     await this.enqueueIfPending(order.id);
   }
 
@@ -141,8 +144,6 @@ export class StripeWebhookService {
         customerName: intent.metadata.prenom,
       });
 
-      await this.computeJuniorRevealIfNeeded(order.id);
-
       await this.mirror.markPaid({
         order,
         externalCommandId: intent.metadata.externalCommandId ?? intent.metadata.commande_id,
@@ -151,6 +152,7 @@ export class StripeWebhookService {
         currency: intent.currency ?? undefined,
       });
 
+      await this.computeJuniorRevealIfNeeded(order.id);
       await this.enqueueIfPending(order.id);
       return;
     }
@@ -341,6 +343,12 @@ export class StripeWebhookService {
         throw new BadRequestException("payment_intent_mismatch");
       }
 
+      if (existing.parentConsentId) {
+        await tx.juniorParentalConsent.updateMany({
+          where: { id: existing.parentConsentId, paidAt: null }, data: { paidAt: new Date() },
+        });
+      }
+
       return tx.totemOrder.update({
         where: { id: existing.id },
         data: {
@@ -382,7 +390,11 @@ export class StripeWebhookService {
 
   async computeJuniorRevealIfNeeded(orderId: string): Promise<void> {
     const order = await this.prisma.totemOrder.findUnique({ where: { id: orderId } });
-    if (!order || order.offer !== "junior" || order.status === TotemOrderStatus.done) return;
+    if (!order || order.offer !== "junior") return;
+    if (order.status === TotemOrderStatus.done && order.pdfKey && order.certificateKey) {
+      await this.deliverJunior(order);
+      return;
+    }
 
     const processingAt = new Date();
     const claimed = await this.prisma.totemOrder.updateMany({
@@ -392,6 +404,8 @@ export class StripeWebhookService {
         OR: [
           { status: TotemOrderStatus.pending },
           { status: TotemOrderStatus.error },
+          { status: TotemOrderStatus.done, pdfKey: null },
+          { status: TotemOrderStatus.done, certificateKey: null },
           { status: TotemOrderStatus.processing, processingAt: { lte: new Date(Date.now() - TOTEM_QUEUE_STALE_MS) } },
         ],
       },
@@ -399,33 +413,35 @@ export class StripeWebhookService {
     });
     if (!claimed.count) return;
 
-    const answers = normalizeJuniorAnswers(order.answers) ?? normalizeJuniorAnswers(order.juniorPayload) ?? {
-      "1": { choice: "A" },
-      "2": { choice: "B" },
-      "3": { choice: "A" },
-      "4": { choice: "C" },
-      "5": { choice: "B" },
-    };
+    const answers = normalizeJuniorAnswers(order.answers) ?? normalizeJuniorAnswers(order.juniorPayload);
+    let failureStep: "image" | "pdf" | "email" = "image";
 
     try {
+      if (!answers || !isCompleteJuniorAnswers(answers)) throw new Error("junior_order_answers_invalid");
       const scores = computeScores(answers);
       const reveal = computeReveal(answers, undefined, order.locale);
 
-      let imageKey: string | null = null;
-      let imageUrl: string | null = null;
-      try {
-        const imageArtefact = await this.generation.generateImage({
+      // Existing paid Junior works get their missing PDFs from the saved image.
+      const imageArtefact = order.imageKey ? await this.storage.readOwnedArtefact(orderId, order.imageKey)
+        : await this.generation.generateImage({
           orderId,
           archetypeId: reveal.totemId,
           animalName: JUNIOR_TOTEM_ANIMALS[reveal.totemId],
           prompt: `Create a Junior TOTEM ancestral artwork for ${reveal.name}. The totem animal is ${JUNIOR_TOTEM_ANIMALS[reveal.totemId]}.`,
         });
-        const image = await this.storage.store(orderId, "image", imageArtefact);
-        imageKey = image.key;
-        imageUrl = image.url;
-      } catch (imgErr) {
-        console.warn("[JuniorReveal] Image generation non-blocking error:", imgErr);
-      }
+      const image = order.imageKey
+        ? { key: order.imageKey, url: this.storage.signDeliveryUrl(order.imageKey) }
+        : await this.storage.store(orderId, "image", imageArtefact);
+      const { key: imageKey, url: imageUrl } = image;
+      failureStep = "pdf";
+      const documents = await generateJuniorDocuments({
+        orderId, firstName: order.customerName ?? "Toi", locale: order.locale,
+        createdAt: order.createdAt, reveal, image: imageArtefact,
+      });
+      const [pdf, certificate] = await Promise.all([
+        this.storage.store(orderId, "pdf", documents.pdf),
+        this.storage.store(orderId, "certificate", documents.certificate),
+      ]);
 
       await this.prisma.userProfile.upsert({
         where: { id: order.userId },
@@ -455,11 +471,17 @@ export class StripeWebhookService {
             orderNumber: reveal.orderNumber,
             phrase: reveal.phrase,
             share: reveal.share,
+            animal: reveal.animal,
+            clanWelcome: reveal.clanWelcome,
+            secondaryAttributes: reveal.secondaryAttributes,
+            serialNumber: juniorSerialNumber(order.id),
             imageKey,
             imageUrl,
           },
           imageKey,
           imageUrl,
+          pdfKey: pdf.key, pdfUrl: pdf.url, parchmentKey: pdf.key, parchmentUrl: pdf.url,
+          certificateKey: certificate.key, certificateUrl: certificate.url,
           completedAt: new Date(),
           errorMessage: null,
         },
@@ -474,23 +496,9 @@ export class StripeWebhookService {
         },
       }).catch(() => undefined);
 
-      await this.mirror.markJuniorDelivered({
-        order,
-        reveal,
-        image: imageUrl ? { url: imageUrl, key: imageKey ?? "" } : null,
-        scores,
-      }).catch((err) => console.warn("[JuniorMirror] markJuniorDelivered warning:", err));
-
-      if (order.customerEmail) {
-        await this.mailer.sendJuniorDelivery({
-          email: order.customerEmail,
-          firstName: order.customerName ?? "Toi",
-          totemName: reveal.name,
-          quality: reveal.quality,
-          phrase: reveal.phrase,
-          locale: order.locale ?? undefined,
-        }).catch((err) => console.warn("[JuniorMailer] sendJuniorDelivery warning:", err));
-      }
+      failureStep = "email";
+      await this.deliverJunior({ ...order, imageKey, imageUrl, pdfKey: pdf.key, pdfUrl: pdf.url,
+        certificateKey: certificate.key, certificateUrl: certificate.url }, { image, pdf, certificate, documents });
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "junior_generation_failed";
       await this.prisma.totemOrder.updateMany({
@@ -504,7 +512,7 @@ export class StripeWebhookService {
       await this.prisma.totemPipelineError.create({
         data: {
           orderId,
-          step: "image",
+          step: failureStep,
           message: errorMessage.slice(0, 1000),
           attempts: 1,
         },
@@ -512,6 +520,35 @@ export class StripeWebhookService {
 
       throw error;
     }
+  }
+
+  private async deliverJunior(order: TotemOrder, prepared?: {
+    image: StoredArtefact; pdf: StoredArtefact; certificate: StoredArtefact;
+    documents: { pdf: GeneratedArtefact; certificate: GeneratedArtefact };
+  }) {
+    const answers = normalizeJuniorAnswers(order.answers);
+    if (!answers || !order.pdfKey || !order.certificateKey || !order.imageKey) throw new Error("junior_delivery_missing");
+    const reveal = computeReveal(answers, undefined, order.locale);
+    const image = prepared?.image ?? { key: order.imageKey, url: this.storage.signDeliveryUrl(order.imageKey) };
+    // Keep email content stable across retries for Resend's idempotency key.
+    const pdf = prepared?.pdf ?? { key: order.pdfKey, url: order.pdfUrl ?? this.storage.signDeliveryUrl(order.pdfKey) };
+    const certificate = prepared?.certificate ?? { key: order.certificateKey, url: order.certificateUrl ?? this.storage.signDeliveryUrl(order.certificateKey) };
+    await this.mirror.markJuniorDelivered({ order, reveal, image, pdf, certificate, scores: computeScores(answers) });
+    // Historical orders may carry the child's email, rather than a confirmed parent's.
+    if (order.deliveryEmailSentAt || !order.customerEmail || !order.parentConsentId) return;
+    const documents = prepared?.documents ?? {
+      pdf: await this.storage.readOwnedArtefact(order.id, order.pdfKey),
+      certificate: await this.storage.readOwnedArtefact(order.id, order.certificateKey),
+    };
+    await this.mailer.sendJuniorDelivery({ email: order.customerEmail, firstName: order.customerName ?? "Toi",
+      totemName: reveal.name, quality: reveal.quality, phrase: reveal.phrase, locale: order.locale ?? undefined,
+      orderId: order.id, pdfUrl: pdf.url, certificateUrl: certificate.url,
+      attachments: [
+        { filename: "Carte-ancestrale-Junior.pdf", content: Buffer.from(documents.pdf.bytes).toString("base64") },
+        { filename: "Certificat-authenticite-Junior.pdf", content: Buffer.from(documents.certificate.bytes).toString("base64") },
+      ],
+    });
+    await this.prisma.totemOrder.update({ where: { id: order.id }, data: { deliveryEmailSentAt: new Date() } });
   }
 }
 

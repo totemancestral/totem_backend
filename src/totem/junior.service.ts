@@ -14,6 +14,7 @@ import { scoreJuniorFeta, type JuniorTotemId } from './feta-scoring';
 import { juniorAnswersSchema, juniorAnswersEqual } from './junior-answers';
 import { claimTotem } from './totem-uniqueness';
 import { SupabaseStorageService } from './supabase-storage.service';
+import { juniorDetails } from './junior-content';
 
 type Dimension = 'F' | 'E' | 'T' | 'A';
 type Scores = Record<Dimension, number>;
@@ -279,11 +280,14 @@ export function computeReveal(answers: Record<string, { choice: string }>, first
   const name = isEn ? JUNIOR_NAMES_EN[scored.totemId] : frenchName;
   const quality = isEn ? JUNIOR_QUALITIES_EN[frenchQuality] ?? frenchQuality : frenchQuality;
   const orderNumber = (hash(JSON.stringify(scored.scores)) % 999999) + 1;
-  const phrase = isEn
+  const phrase = scored.totemId === 'zara_leopard'
+    ? (isEn ? 'Before you, an ancestor waited in silence to act in the light.' : 'Avant toi, un ancêtre attendait dans le silence pour agir dans la lumière.')
+    : isEn
     ? `Before you, an ancestor carried ${quality.toLowerCase()} in their actions, and this sign now travels with your name.`
     : `Avant toi, un ancêtre portait ${qualityPhrase(quality)} dans son geste, et ce signe avance maintenant avec ton nom.`;
 
   return {
+    ...juniorDetails(scored.totemId, locale),
     totemId: scored.totemId,
     dominant: scored.dominant,
     secondary: scored.secondary,

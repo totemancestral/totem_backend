@@ -81,6 +81,8 @@ model TotemOrder {
   userId              String
   customerEmail       String?
   customerName        String?
+  parentConsentId     String?              @db.Uuid
+  parentConsent       JuniorParentalConsent? @relation(fields: [parentConsentId], references: [id], onDelete: SetNull)
   checkoutSessionId   String               @unique
   checkoutExpiredAt   DateTime?
   paymentIntentId     String?              @unique
@@ -119,6 +121,27 @@ model TotemOrder {
   @@index([status, createdAt])
   @@index([offer, createdAt])
   @@index([country])
+}
+
+model JuniorParentalConsent {
+  id                String    @id @default(uuid()) @db.Uuid
+  childUserId       String    @db.Uuid
+  externalCommandId String    @db.Uuid
+  parentEmail       String
+  firstName         String
+  locale            String
+  answers           Json
+  tokenHash         String    @unique @db.VarChar(64)
+  consentVersion    String
+  consentedAt       DateTime
+  confirmedAt       DateTime?
+  paidAt            DateTime?
+  revokedAt         DateTime?
+  expiresAt         DateTime
+  createdAt         DateTime  @default(now())
+  orders            TotemOrder[]
+
+  @@index([childUserId, createdAt])
 }
 
 enum CaurisSerie {

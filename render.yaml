@@ -34,12 +34,6 @@ services:
         sync: false
       - key: CHECKOUT_CANCEL_URL
         sync: false
-      - key: TOTEM_PRICE_ORIGINE_CENTS
-        value: 4900
-      - key: TOTEM_PRICE_ANCESTRAL_CENTS
-        value: 9900
-      - key: TOTEM_PRICE_FAMILLE_CENTS
-        value: 21900
       - key: TOTEM_PRICE_JUNIOR_CENTS
         value: 999
       - key: ANTHROPIC_API_KEY

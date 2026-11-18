@@ -85,36 +85,54 @@ export class ResendMailerService {
     quality: string;
     phrase: string;
     locale?: string;
+    orderId: string;
+    pdfUrl: string;
+    certificateUrl: string;
+    attachments: { filename: string; content: string }[];
   }): Promise<boolean> {
     const isFr = input.locale !== "en";
     const subject = isFr
-      ? `Ton Totem Junior est prêt : ${input.totemName}`
-      : `Your Junior Totem is ready: ${input.totemName}`;
-    const title = isFr ? "Ton Totem Junior s'est réveillé !" : "Your Junior Totem has awakened!";
-    const dashboardUrl = `https://totem-ancestral.com/${isFr ? "fr" : "en"}/espace`;
+      ? `La carte ancestrale Junior de ${input.firstName} est prête`
+      : `${input.firstName}’s Junior Ancestral Card is ready`;
+    const title = isFr ? "La carte ancestrale Junior est prête" : "The Junior Ancestral Card is ready";
 
     const inner = `
         <p style="margin:0 0 22px">${
           isFr
-            ? `Bonjour ${escapeHtml(input.firstName)}, ton voyage a révélé ton animal totem et ton nom sacré.`
-            : `Hello ${escapeHtml(input.firstName)}, your journey has revealed your totem animal and ancestral name.`
+            ? `Bonjour, le parcours de ${escapeHtml(input.firstName)} a révélé son animal totem et son nom sacré. Sa carte ancestrale et son certificat d’authenticité numéroté sont joints à cet e-mail.`
+            : `Hello, ${escapeHtml(input.firstName)}’s journey has revealed their totem animal and sacred name. Their Ancestral Card and numbered Certificate of Authenticity are attached to this email.`
         }</p>
         <div style="background:rgba(216,173,77,.08);border:1px solid rgba(216,173,77,.25);border-radius:12px;padding:20px;margin:0 0 24px">
           <p style="margin:0 0 8px;color:#f6c865;font-size:20px;font-family:Georgia,serif;text-transform:uppercase">${escapeHtml(input.totemName)}</p>
           <p style="margin:0 0 12px;color:#d8ad4d;font-size:13px;font-weight:700">${escapeHtml(input.quality)}</p>
           <p style="margin:0;color:#e2e1ee;font-size:14px;font-style:italic">&laquo; ${escapeHtml(input.phrase)} &raquo;</p>
         </div>
-        <p style="margin:0 0 8px">
-          <a href="${dashboardUrl}" style="display:inline-block;background:#d8ad4d;background:linear-gradient(135deg,#eacb63,#d8ad4d);color:#0c0e16;text-decoration:none;font-weight:700;padding:15px 30px;border-radius:999px;text-transform:uppercase;letter-spacing:.14em;font-size:12px">${isFr ? "Accéder à mon espace" : "Go to my space"}</a>
-        </p>`;
+        <p>${fileLink(input.pdfUrl, isFr ? "Carte ancestrale (PDF)" : "Ancestral Card (PDF)", !isFr)}${fileLink(input.certificateUrl, isFr ? "Certificat d’authenticité (PDF)" : "Certificate of Authenticity (PDF)", !isFr)}</p>
+        <p>${isFr ? "Les deux documents sont téléchargeables sans connexion au compte de l’enfant." : "Both documents can be downloaded without signing in to the child’s account."}</p>`;
 
     await this.send({
       to: [input.email],
       subject,
       html: wrapEmail(title, inner, isFr ? "fr" : "en"),
+      attachments: input.attachments,
+      idempotencyKey: `junior-delivery-${input.orderId}`,
     });
 
     return true;
+  }
+
+  async sendParentConfirmation(input: { email: string; firstName: string; locale: string; link: string }): Promise<void> {
+    const fr = input.locale !== "en";
+    const title = fr ? "Autorisation parentale pour Totem Junior" : "Parental permission for Junior Totem";
+    const inner = `<p>${fr
+      ? `Une demande de création de carte ancestrale concerne ${escapeHtml(input.firstName)}.`
+      : `An Ancestral Card creation request concerns ${escapeHtml(input.firstName)}.`}</p>
+      <p>${fr
+        ? "Ouvrez ce lien pour confirmer votre adresse et votre autorisation, puis régler 9,99 €. Le lien est valable 24 heures."
+        : "Open this link to confirm your address and permission, then pay €9.99. The link is valid for 24 hours."}</p>
+      <p><a href="${escapeAttribute(input.link)}" style="color:#d8ad4d">${fr ? "Voir la demande parentale" : "View the parental request"}</a></p>
+      <p>${fr ? "Si vous ne reconnaissez pas cette demande, vous pouvez ignorer cet e-mail." : "If you do not recognize this request, you can ignore this email."}</p>`;
+    await this.send({ to: [input.email], subject: title, html: wrapEmail(title, inner, fr ? "fr" : "en") });
   }
 
   async sendFailureAlert(orderId: string, error: string): Promise<void> {
@@ -144,8 +162,15 @@ export class ResendMailerService {
 
     if (template) {
       const harmonize = (value: string) => value
-        .replace(/carte ancestrale/gi, "Parchemin ancestral")
-        .replace(/ancestral map|ancestral card/gi, "Ancestral Parchment");
+        .replace(/\ble parchemin ancestral\b/gi, "la carte ancestrale")
+        .replace(/\bun parchemin ancestral\b/gi, "une carte ancestrale")
+        .replace(/\bdu parchemin ancestral\b/gi, "de la carte ancestrale")
+        .replace(/\bparchemin ancestral\b|\bparchemin\b/gi, "Carte ancestrale")
+        .replace(/\bancestral parchment\b|\bancestral map\b|\bparchment\b/gi, "Ancestral Card")
+        .replace(/>\s*Image\s*</gi, `>${copy.image}<`)
+        .replace(/>\s*Audio\s*</gi, `>${copy.audio}<`)
+        .replace(/>\s*PDF\s*</gi, `>${copy.pdf}<`)
+        .replace(/>\s*(?:Récit|Story)\s*</gi, `>${locale === "en" ? "Ancestral Story" : "Histoire ancestrale"}<`);
       return renderStoredTemplate({ subject: harmonize(template.subject), html_content: harmonize(template.html_content) }, params);
     }
     return renderFallbackDelivery(payload, copy);
@@ -188,19 +213,21 @@ export class ResendMailerService {
     return data as EmailTemplate | null;
   }
 
-  private async send(payload: { to: string[]; subject: string; html: string }): Promise<void> {
+  private async send(payload: { to: string[]; subject: string; html: string; attachments?: { filename: string; content: string }[]; idempotencyKey?: string }): Promise<void> {
     const response = await fetch("https://api.resend.com/emails", {
       method: "POST",
       signal: AbortSignal.timeout(25_000),
       headers: {
         Authorization: `Bearer ${this.apiKey}`,
         "Content-Type": "application/json",
+          ...(payload.idempotencyKey ? { "Idempotency-Key": payload.idempotencyKey } : {}),
       },
       body: JSON.stringify({
         from: `${this.senderName} <${this.senderEmail}>`,
         to: payload.to,
         subject: payload.subject,
         html: payload.html,
+          ...(payload.attachments ? { attachments: payload.attachments } : {}),
       }),
     });
 
@@ -237,9 +264,9 @@ function readDeliveryCopy(locale: "fr" | "en"): DeliveryCopy {
       nameLabel: "Ancestral name",
       ready: "Your digital box is composed and waiting for you.",
       linksIntro: "Your files are available here:",
-      image: "Image",
-      audio: "Audio",
-      pdf: "Ancestral Parchment (PDF)",
+      image: "Totem",
+      audio: "The Ancestor’s Voice",
+      pdf: "Ancestral Card (PDF)",
       certificate: "Certificate",
       signedNotice: "These signed links remain valid for 30 days.",
       fallbackName: "Your totem",
@@ -252,9 +279,9 @@ function readDeliveryCopy(locale: "fr" | "en"): DeliveryCopy {
     nameLabel: "Nom ancestral",
     ready: "Votre coffret numérique est composé et vous attend.",
     linksIntro: "Vos fichiers sont disponibles ici :",
-    image: "Image",
-    audio: "Audio",
-    pdf: "Parchemin ancestral (PDF)",
+    image: "Totem",
+    audio: "La voix de l’ancêtre",
+    pdf: "Carte ancestrale (PDF)",
     certificate: "Certificat",
     signedNotice: "Ces liens signés restent valides pendant 30 jours.",
     fallbackName: "Votre totem",

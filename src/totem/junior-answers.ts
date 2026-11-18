@@ -80,13 +80,7 @@ export function normalizeJuniorAnswers(value: unknown): JuniorAnswers | null {
     };
   }
 
-  return {
-    "1": { choice: choices[0] ?? "A" },
-    "2": { choice: choices[1] ?? "B" },
-    "3": { choice: choices[2] ?? "A" },
-    "4": { choice: choices[3] ?? "C" },
-    "5": { choice: choices[4] ?? "B" },
-  };
+  return null;
 }
 
 export function parseJuniorAnswers(value: unknown): JuniorAnswers {

@@ -73,6 +73,10 @@ describe("worker recovery and ownership", () => {
     await s.internal.process(job);
     expect(s.row.status).toBe("done");
     expect(s.row.attempts).toBe(1);
+    expect(s.generation.generateAudio).not.toHaveBeenCalled();
+    expect(s.generation.generateImage).toHaveBeenCalledOnce();
+    expect(s.generation.generatePdf).toHaveBeenCalledOnce();
+    expect(s.generation.generateCertificate).toHaveBeenCalledOnce();
     expect(s.mirror.markDelivered).toHaveBeenCalledOnce();
     expect(s.queue.ack).toHaveBeenCalledWith(job);
     expect(s.queue.retry).not.toHaveBeenCalled();

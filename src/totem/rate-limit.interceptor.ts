@@ -7,6 +7,8 @@ import { SupabaseAuthService } from "./supabase-auth.service";
 // Selected controller methods only: Stripe callbacks, health and signed assets
 // deliberately do not consume interactive user quotas.
 export const USER_RATE_LIMITS: Record<string, number> = {
+  "ParentConsentController.request": 3,
+  "ParentConsentController.latest": 30,
   "CheckoutController.create": 10,
   "TotemOrdersController.complete": 10,
   "TotemOrdersController.retry": 5,

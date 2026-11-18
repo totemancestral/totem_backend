@@ -18,7 +18,7 @@ describe("delivery language", () => {
   it.each(["fr", "en"])("renders the %s delivery fallback without real email calls", async locale => {
     mocks.template.mockResolvedValue({ data: null, error: null });
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", fetchMock);
-    await new ResendMailerService(config() as never).sendDelivery(delivery(locale) as never);
+    await new ResendMailerService(config() as never).sendDelivery({ ...delivery(locale), audioUrl: "https://example.invalid/audio" } as never);
     const sent = JSON.parse(fetchMock.mock.calls[0]![1].body);
     expect(sent.html).toContain(`lang="${locale}"`);
     expect(sent.subject).toBe(locale === "en" ? "Your TOTEM ANCESTRAL box is ready" : "Votre coffret TOTEM ANCESTRAL est prêt");
@@ -26,7 +26,9 @@ describe("delivery language", () => {
     expect(sent.html).toContain("Name &lt;unsafe&gt;");
     expect(sent.html).not.toContain("Name <unsafe>");
     expect(sent.html).toContain("30");
-    expect(sent.html).toContain(locale === "en" ? "Ancestral Parchment (PDF)" : "Parchemin ancestral (PDF)");
+    expect(sent.html).toContain(locale === "en" ? "Ancestral Card (PDF)" : "Carte ancestrale (PDF)");
+    expect(sent.html).toContain(locale === "en" ? "The Ancestor’s Voice" : "La voix de l’ancêtre");
+    expect(sent.html).toContain("Totem");
   });
   it("does not load the French stored template for an English delivery", async () => {
     mocks.template.mockClear().mockImplementation(async locale => ({ data: locale === "fr" ? { subject: "Ancien modèle français", html_content: "Français" } : null, error: null }));
@@ -42,8 +44,8 @@ describe("delivery language", () => {
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toMatchObject({ subject: "Ready test-order", html: expect.stringContaining("Name &lt;unsafe&gt;") });
   });
   it.each(["fr", "en"])("harmonizes legacy %s delivery templates before interpolation", async locale => {
-    const oldName = locale === "en" ? "Ancestral map" : "Carte ancestrale";
-    const newName = locale === "en" ? "Ancestral Parchment" : "Parchemin ancestral";
+    const oldName = locale === "en" ? "Ancestral Parchment" : "Parchemin ancestral";
+    const newName = locale === "en" ? "Ancestral Card" : "Carte ancestrale";
     mocks.template.mockResolvedValue({ data: { subject: oldName, html_content: `<a href="{{pdfUrl}}">${oldName}</a>` }, error: null });
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", fetchMock);
     await new ResendMailerService(config() as never).sendDelivery(delivery(locale) as never);
@@ -52,6 +54,22 @@ describe("delivery language", () => {
     expect(sent.html).toContain(newName);
     expect(sent.html).not.toContain(oldName);
     expect(sent.html).toContain("https://example.invalid/pdf");
+  });
+  it.each(["fr", "en"])("renames visible %s file links without rewriting URLs or user data", async locale => {
+    mocks.template.mockResolvedValue({ data: {
+      subject: "{{ancestralName}}",
+      html_content: '<p>{{ancestralName}}</p><a href="{{imageUrl}}">Image</a><a href="{{audioUrl}}">Audio</a><a href="{{pdfUrl}}">PDF</a>',
+    }, error: null });
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", fetchMock);
+    const payload = delivery(locale);
+    payload.order.ancestralName = "Parchemin ancestral";
+    await new ResendMailerService(config() as never).sendDelivery(payload as never);
+    const sent = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    expect(sent.subject).toBe("Parchemin ancestral");
+    expect(sent.html).toContain(">Totem<");
+    expect(sent.html).toContain(locale === "en" ? ">The Ancestor’s Voice<" : ">La voix de l’ancêtre<");
+    expect(sent.html).toContain(locale === "en" ? ">Ancestral Card (PDF)<" : ">Carte ancestrale (PDF)<");
+    expect(sent.html).toContain(payload.pdfUrl);
   });
   it("keeps Junior scoring and identity codes stable while translating its delivery content", () => {
     const answers = Object.fromEntries(Array.from({ length: 5 }, (_, i) => [String(i + 1), { choice: "A" }]));
@@ -65,10 +83,17 @@ describe("delivery language", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", fetchMock);
     const answers = Object.fromEntries(Array.from({ length: 5 }, (_, i) => [String(i + 1), { choice: "A" }]));
     const reveal = computeReveal(answers, undefined, "en");
-    await new ResendMailerService(config() as never).sendJuniorDelivery({ email: "test@example.invalid", firstName: "Test", totemName: reveal.name, quality: reveal.quality, phrase: reveal.phrase, locale: "en" });
+    await new ResendMailerService(config() as never).sendJuniorDelivery({ email: "test@example.invalid", firstName: "Test", totemName: reveal.name, quality: reveal.quality, phrase: reveal.phrase, locale: "en",
+      orderId: "test-order", pdfUrl: "https://example.invalid/card.pdf", certificateUrl: "https://example.invalid/certificate.pdf",
+      attachments: [{ filename: "card.pdf", content: "JVBERg==" }, { filename: "certificate.pdf", content: "JVBERg==" }],
+    });
     const sent = JSON.parse(fetchMock.mock.calls[0]![1].body);
     expect(sent.html).toContain('lang="en"'); expect(sent.html).toContain("Before you, an ancestor");
-    expect(sent.html).toContain("/en/espace"); expect(sent.html).not.toContain("Avant toi");
+    expect(sent.html).toContain("without signing in"); expect(sent.html).not.toContain("Avant toi");
+    expect(sent.attachments).toHaveLength(2);
+    expect(sent.attachments.map((a: { filename: string }) => a.filename)).toEqual(["card.pdf", "certificate.pdf"]);
+    expect(sent.html).not.toContain("image.jpg");
+    expect(fetchMock.mock.calls[0]![1].headers["Idempotency-Key"]).toBe("junior-delivery-test-order");
   });
 });
 
@@ -87,6 +112,8 @@ describe("PDF and narration language", () => {
       expect(pdf.getPageCount()).toBeGreaterThan(0);
     }
     expect(texts.join("\n")).toContain(locale === "en" ? "Prepared for Reader" : "Préparé pour Reader");
+    expect(texts.join("\n")).toContain(locale === "en" ? "ANCESTRAL CARD" : "CARTE ANCESTRALE");
+    expect(texts.join("\n")).toContain(locale === "en" ? "ANCESTRAL STORY" : "HISTOIRE ANCESTRALE");
     if (locale === "fr") {
       expect(texts.join("\n")).toContain("Décret royal de révélation symbolique");
       expect(texts.join("\n")).toContain("RÉVÉLATION");

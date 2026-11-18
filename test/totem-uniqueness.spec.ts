@@ -18,7 +18,7 @@ function fixture(options: { owned?: boolean; locked?: boolean; orders?: Record<s
   } } };
   const create = vi.fn().mockResolvedValue({ id: "cs_new" });
   const reuse = vi.fn(async session => ({ id: session.id }));
-  const run = (offer = "ancestral") => uniqueCheckout({ db: db as never, stripe: stripe as never, userId: "user", offer, create, reuse });
+  const run = (offer = "ancestral") => uniqueCheckout({ db: db as never, stripe: stripe as never, userId: "user", offer, amountCents: 4900, create, reuse });
   return { run, tx, db, stripe, create, reuse };
 }
 const pending = { id: "old", status: "pending", offer: "ancestral", checkoutSessionId: "cs_old", queuedAt: null, textPayload: null, juniorPayload: null };
@@ -40,7 +40,7 @@ describe("one Totem per account, across offers", () => {
   });
   it("reuses an unpaid open session for the same offer and draft", async () => {
     const s = fixture({ orders: [pending] });
-    s.stripe.checkout.sessions.retrieve.mockResolvedValue({ id: "cs_old", status: "open", payment_status: "unpaid", url: "https://checkout.example.invalid/old", metadata: {} } as never);
+    s.stripe.checkout.sessions.retrieve.mockResolvedValue({ id: "cs_old", status: "open", payment_status: "unpaid", amount_subtotal: 4900, currency: "eur", url: "https://checkout.example.invalid/old", metadata: {} } as never);
     await expect(s.run()).resolves.toEqual({ id: "cs_old" });
     expect(s.create).not.toHaveBeenCalled(); expect(s.stripe.checkout.sessions.expire).not.toHaveBeenCalled();
   });
@@ -50,6 +50,14 @@ describe("one Totem per account, across offers", () => {
     await s.run("junior");
     expect(s.stripe.checkout.sessions.expire).toHaveBeenCalledExactlyOnceWith("cs_old");
     expect(s.tx.$executeRaw).toHaveBeenCalled(); expect(s.create).toHaveBeenCalledOnce();
+  });
+  it("expires a session at the previous price before creating one at the current price", async () => {
+    const s = fixture({ orders: [pending] });
+    s.stripe.checkout.sessions.retrieve.mockResolvedValue({ id: "cs_old", status: "open", payment_status: "unpaid", amount_subtotal: 9900, currency: "eur", url: "https://checkout.example.invalid/old", metadata: {} } as never);
+    await s.run();
+    expect(s.stripe.checkout.sessions.expire).toHaveBeenCalledExactlyOnceWith("cs_old");
+    expect(s.reuse).not.toHaveBeenCalled();
+    expect(s.create).toHaveBeenCalledOnce();
   });
   it("allows another checkout only after Stripe confirms expiration and non-payment", async () => {
     const s = fixture({ orders: [pending] }); await s.run(); expect(s.create).toHaveBeenCalledOnce();

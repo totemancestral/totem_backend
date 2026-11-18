@@ -4,6 +4,8 @@ import { TotemOrder } from "@prisma/client";
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { StoredArtefact, TotemTextPayload } from "./totem.types";
 import { deliveredParchmentText } from "./parchment-text";
+import { juniorSerialNumber } from "./junior-content";
+import { adultIdentityFor } from "./adult-identity";
 
 @Injectable()
 export class SupabaseMirrorService {
@@ -114,6 +116,7 @@ export class SupabaseMirrorService {
         source: "totem-backend",
         totemOrderId: input.order.id,
         archetypeId: input.text.archetypeId,
+        adultIdentity: input.text.adultIdentity ?? adultIdentityFor(input.text.archetypeId, input.order.locale),
         nomComplet: input.text.ancestralName,
         workTitleFr: input.text.workTitleFr,
         workTitleEn: input.text.workTitleEn,
@@ -165,21 +168,36 @@ export class SupabaseMirrorService {
       orderNumber: number;
       dominant: string;
       secondary: string;
+      animal: string;
+      clanWelcome: string;
+      secondaryAttributes: string[];
       share: { caption: string; messageDefi: string };
     };
     image?: { url: string; key: string } | null;
+    pdf: StoredArtefact;
+    certificate: StoredArtefact;
     scores?: Record<string, number>;
   }): Promise<void> {
     const commandId = await this.findCommandId(input.order);
     if (!commandId) return;
 
-    const numeroSerie = `JNR-${new Date().getFullYear()}-${commandId.slice(0, 8).toUpperCase()}`;
+    const numeroSerie = juniorSerialNumber(input.order.id);
+    const en = input.order.locale === "en";
     const oeuvre = {
       user_id: input.order.userId,
       commande_id: commandId,
       numero_serie: numeroSerie,
       nom_totem: input.reveal.name,
-      recit: input.reveal.phrase,
+      recit: [
+        `${en ? "Your sacred ancestral name" : "Ton nom ancestral sacré"}\n${input.reveal.name}`,
+        `${en ? "Your totem animal" : "Ton animal totem"}\n${input.reveal.animal}`,
+        `${en ? "Your main quality" : "Ta qualité principale"}\n${input.reveal.quality}`,
+        `${en ? "Your identity phrase" : "Ta phrase d’identité"}\n${input.reveal.phrase}`,
+        `${en ? "Your clan's welcome message" : "Le message d’accueil de ton clan"}\n${input.reveal.clanWelcome}`,
+        `${en ? "Your secondary attributes" : "Tes attributs secondaires"}\n${input.reveal.secondaryAttributes.join(" / ")}`,
+      ].join("\n\n"),
+      pdf_url: input.pdf.url,
+      certificate_url: input.certificate.url,
       image_url: input.image?.url ?? "/assets/masque-ngil-authentique.webp",
       statut: "livree",
       metadata: {
@@ -200,6 +218,11 @@ export class SupabaseMirrorService {
         langue: input.order.locale ?? "fr",
         offre: "junior",
         imageKey: input.image?.key ?? null,
+        pdfKey: input.pdf.key,
+        certificateKey: input.certificate.key,
+        animal: input.reveal.animal,
+        clanWelcome: input.reveal.clanWelcome,
+        secondaryAttributes: input.reveal.secondaryAttributes,
       },
     };
 

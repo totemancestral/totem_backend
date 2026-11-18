@@ -12,6 +12,7 @@ type SignedPayload = {
 };
 
 type ReadObject = {
+  key: string;
   body: Readable;
   contentType: string;
   contentLength?: number;
@@ -84,6 +85,7 @@ export class SupabaseStorageService {
 
     return {
       body: Readable.from([bytes]),
+      key,
       contentType: data.type || 'application/octet-stream',
       contentLength: bytes.byteLength,
     };
@@ -95,6 +97,17 @@ export class SupabaseStorageService {
     const signature = this.sign(payload);
 
     return `${this.publicAssetBaseUrl}/totem-assets/${payload}.${signature}`;
+  }
+
+  /** Internal delivery only, after the caller has loaded the owning order. */
+  async readOwnedArtefact(orderId: string, key: string): Promise<GeneratedArtefact> {
+    const prefix = `orders/${orderId}/`;
+    if (!key.startsWith(prefix) || key.slice(prefix.length).includes('/') || key.includes('..') || key.includes('\\')) {
+      throw new ForbiddenException('artefact_owner_mismatch');
+    }
+    const { data, error } = await this.supabase.storage.from(this.bucket).download(key);
+    if (error || !data) throw new NotFoundException('artefact_not_found');
+    return { bytes: new Uint8Array(await data.arrayBuffer()), contentType: data.type, extension: key.split('.').pop() ?? '' };
   }
 
   /** À appeler seulement après contrôle du propriétaire de la commande en base. */

@@ -1,5 +1,6 @@
 import { QuestionnaireAnswer, TotemStoryPage, TotemTextPayload } from "./totem.types";
 import { CultureFiche, cultureFicheForArchetype } from "./totem-culture";
+import { adultIdentityFor } from "./adult-identity";
 
 type Locale = "fr" | "en";
 type Choice = "A" | "B" | "C" | "D";
@@ -649,7 +650,7 @@ ${formatPivotAnswers(context.answers)}
 
 MISSION :
 1. A1 : valider l'archetype impose par les scores FETA et le nom ancestral compose.
-2. A2 : composer le Parchemin Ancestral en ${context.language}, 1500-1800 caracteres espaces compris, 5 mouvements separes par doubles sauts de ligne, variante narrative ${context.narrativeVariant}, structures en 3 temps emotionnels :
+2. A2 : composer l’Histoire ancestrale de la Carte ancestrale en ${context.language}, 1500-1800 caracteres espaces compris, 5 mouvements separes par doubles sauts de ligne, variante narrative ${context.narrativeVariant}, structures en 3 temps emotionnels :
    Temps 1, le manque ancien (mouvements Ouverture et Portrait) : installe une perte, une rupture ou un silence dans l'Histoire ou la lignee, jamais porte comme un sentiment personnel de l'ancetre (qui reste fort) ni du client a ce stade. Prends appui sur la trame "TERRES DE L'ANCETRE" ci dessus comme decor reel, sans jamais l'affirmer comme un fait sur le client (jamais "tu descends de", toujours au conditionnel narratif, par exemple "les terres d'ou vient ton ancetre imagine sont marquees par...").
    Temps 2, l'epreuve (mouvement Epreuve) : un moment de tension ou de choix qui mobilise directement le temperament du client tel qu'il s'est revele dans ses reponses, pas une epreuve generique. Reprends litteralement ou quasi litteralement au moins une des reponses pivots ci dessus a un moment cle de ce mouvement : si un champ libre existe, cite le au plus pres des mots du client ; s'il est vide, construis la scene dans l'esprit du choix retenu, sans inventer de citation qui n'existe pas.
    Temps 3, la reconnaissance (mouvements Transmission et Passage) : l'ancetre reconnait le client, s'adresse a lui directement, et referme la boucle ouverte au temps 1. C'est le pic emotionnel du texte. La derniere phrase du parchemin, sans exception, doit nommer le nom ancestral complet "${context.nomComplet}" et s'adresser au client a la deuxieme personne.
@@ -793,6 +794,7 @@ export function buildAdultV3Payload(
 ): TotemTextPayload {
   return {
     archetypeId: recit.archetypeId,
+    adultIdentity: adultIdentityFor(recit.archetypeId, context.language) ?? undefined,
     ancestralName: recit.ancestralName,
     parchmentText: recit.parchmentText,
     audioMessage: recit.audioMessage,

@@ -6,14 +6,14 @@ import Stripe from "stripe";
 import { z } from "zod";
 import { PrismaService } from "../prisma/prisma.service";
 import { SupabaseMirrorService } from "./supabase-mirror.service";
-import { TotemOffer } from "./totem.types";
 import { juniorAnswersSchema } from "./junior-answers";
 import { adultCheckoutAnswersSchema } from "./adult-answers";
 import { OFFER_LABELS, TOTEM_PRICES_CENTS } from "./prices";
 import { hasTotem, uniqueCheckout } from "./totem-uniqueness";
+import { requireParentConsent } from "./parent-consent";
 
 const adultCheckoutSchema = z.object({
-  offer: z.enum(["origine", "ancestral", "famille"]),
+  offer: z.enum(["origine", "ancestral"]),
   externalCommandId: z.string().min(1).max(120).optional(),
   answers: adultCheckoutAnswersSchema,
   locale: z.string().min(2).max(12).optional(),
@@ -26,8 +26,9 @@ const adultCheckoutSchema = z.object({
 
 const juniorCheckoutSchema = z.object({
   offer: z.literal("junior"),
+  parentConsentId: z.string().uuid().optional(),
   externalCommandId: z.string().min(1).max(120).optional(),
-  firstName: z.string().trim().max(40).optional(),
+  firstName: z.string().trim().max(80).optional(),
   answers: juniorAnswersSchema,
   locale: z.enum(["fr", "en"]).optional(),
   successUrl: z.string().url().max(500).optional(),
@@ -49,7 +50,6 @@ export class CheckoutService {
   private readonly stripeSecretKey?: string;
   private readonly successUrl: string;
   private readonly cancelUrl: string;
-  private readonly offerPrices: Record<TotemOffer, number>;
 
   constructor(
     config: ConfigService,
@@ -59,12 +59,6 @@ export class CheckoutService {
     this.stripeSecretKey = config.get<string>("STRIPE_SECRET_KEY");
     this.successUrl = config.getOrThrow<string>("CHECKOUT_SUCCESS_URL");
     this.cancelUrl = config.getOrThrow<string>("CHECKOUT_CANCEL_URL");
-    this.offerPrices = {
-      origine: config.get<number>("TOTEM_PRICE_ORIGINE_CENTS") ?? TOTEM_PRICES_CENTS.origine,
-      ancestral: config.get<number>("TOTEM_PRICE_ANCESTRAL_CENTS") ?? TOTEM_PRICES_CENTS.ancestral,
-      famille: config.get<number>("TOTEM_PRICE_FAMILLE_CENTS") ?? TOTEM_PRICES_CENTS.famille,
-      junior: TOTEM_PRICES_CENTS.junior, // Strictement 9,99 € (999 centimes)
-    };
   }
 
   async createSession(input: {
@@ -72,12 +66,23 @@ export class CheckoutService {
     userId: string;
     email?: string;
   }): Promise<{ id: string; url: string | null }> {
-    const payload = this.readInput(input.body);
+    let payload = this.readInput(input.body);
     if (payload.externalCommandId) await this.mirror.requireOwnedCommand(payload.externalCommandId, input.userId);
+    if (payload.offer === "junior") {
+      const consent = await requireParentConsent(this.prisma, payload.parentConsentId, input.userId);
+      payload = this.readInput({
+        offer: "junior", parentConsentId: consent.id, externalCommandId: consent.externalCommandId,
+        firstName: consent.firstName, answers: consent.answers, locale: consent.locale,
+        successUrl: payload.successUrl, cancelUrl: payload.cancelUrl,
+      });
+      input = { ...input, body: payload, email: consent.parentEmail };
+    }
     let createdSession: string | undefined;
     try {
       return await uniqueCheckout({
         db: this.prisma, userId: input.userId, offer: payload.offer,
+        amountCents: TOTEM_PRICES_CENTS[payload.offer],
+        parentConsentId: payload.offer === "junior" ? payload.parentConsentId : undefined,
         externalCommandId: payload.externalCommandId, stripe: this.readStripe(),
         create: tx => this.createLockedSession(input, tx, id => { createdSession = id; }),
         reuse: async session => ({ id: session.id, url: session.url }),
@@ -99,7 +104,8 @@ export class CheckoutService {
       await this.mirror.requireOwnedCommand(payload.externalCommandId, input.userId);
     }
     const isJunior = payload.offer === "junior";
-    const amount = isJunior ? TOTEM_PRICES_CENTS.junior : this.offerPrices[payload.offer];
+    if (isJunior) await requireParentConsent(db, payload.parentConsentId, input.userId);
+    const amount = TOTEM_PRICES_CENTS[payload.offer];
 
     if (amount <= 0 || (isJunior && amount !== 999)) {
       throw new BadRequestException("offer_price_invalid");
@@ -227,6 +233,7 @@ export class CheckoutService {
         id: orderId,
         userId,
         customerEmail: email,
+        parentConsentId: payload.parentConsentId,
         customerName: payload.firstName,
         checkoutSessionId: session.id,
         status: TotemOrderStatus.pending,
@@ -313,6 +320,7 @@ export class CheckoutService {
     };
 
     if (input.payload.offer === "junior") {
+      if (input.payload.parentConsentId) meta.parentConsentId = input.payload.parentConsentId;
       if (input.payload.firstName) meta.prenom = input.payload.firstName;
       if (input.payload.locale) meta.locale = input.payload.locale;
       meta.answers = JSON.stringify(input.payload.answers);

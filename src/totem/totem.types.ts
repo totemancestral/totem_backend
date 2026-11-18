@@ -27,6 +27,7 @@ export type CheckoutMetadata = {
 };
 
 export type TotemTextPayload = {
+  adultIdentity?: import("./adult-identity").AdultIdentity;
   archetypeId: string;
   ancestralName: string;
   parchmentText: string;

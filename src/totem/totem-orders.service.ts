@@ -68,7 +68,7 @@ export class TotemOrdersService {
       throw new HttpException({ code: "payment_not_confirmed" }, HttpStatus.PAYMENT_REQUIRED);
     }
 
-    if (order.offer === "junior" && order.status !== TotemOrderStatus.done) {
+    if (order.offer === "junior" && (order.status !== TotemOrderStatus.done || !order.pdfKey || !order.certificateKey || (order.parentConsentId && !order.deliveryEmailSentAt))) {
       await this.webhook.computeJuniorRevealIfNeeded(order.id).catch((err) =>
         console.warn("[TotemOrdersService] computeJuniorRevealIfNeeded warning:", err),
       );

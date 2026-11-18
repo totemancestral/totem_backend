@@ -19,6 +19,8 @@ export async function uniqueCheckout<T>(input: {
   db: PrismaClient;
   userId: string;
   offer: string;
+  amountCents: number;
+  parentConsentId?: string;
   externalCommandId?: string;
   stripe: Stripe;
   create: (tx: Prisma.TransactionClient) => Promise<T>;
@@ -49,7 +51,9 @@ export async function uniqueCheckout<T>(input: {
         continue;
       }
       if (session.status !== "open" || session.payment_status !== "unpaid") throw new ServiceUnavailableException("payment_verification_unavailable");
-      if (!reusable && order.offer === input.offer && session.metadata?.externalCommandId === input.externalCommandId && session.url) {
+      if (!reusable && order.offer === input.offer && session.amount_subtotal === input.amountCents
+        && session.currency === "eur" && session.metadata?.parentConsentId === input.parentConsentId
+        && session.metadata?.externalCommandId === input.externalCommandId && session.url) {
         reusable = session;
         continue;
       }

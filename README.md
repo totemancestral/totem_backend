@@ -20,12 +20,11 @@ Backend de production de TOTEM Ancestral. Il gere Stripe, une file Redis crash-s
 
 | Offre      | Centimes | EUR    |
 | ---------- | -------- | ------ |
-| origine    | 4900     | 49 €   |
-| ancestral  | 9900     | 99 €   |
-| famille    | 21900    | 219 €  |
+| origine    | 2900     | 29 €   |
+| ancestral  | 4900     | 49 €   |
 | junior     | 999      | 9,99 € |
 
-Les variables `TOTEM_PRICE_*_CENTS` peuvent surcharger, mais `render.yaml` / `.env.example` doivent rester ces constantes.
+Les montants adultes facturés proviennent de ces constantes. Origine comprend la carte ancestrale, le totem et le certificat numéroté. Révélation ajoute la voix de l’ancêtre. Famille reste lisible pour les commandes historiques et ne peut plus être achetée.
 
 ## Scoring FETA
 

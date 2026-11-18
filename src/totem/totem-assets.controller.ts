@@ -23,7 +23,7 @@ export class TotemAssetsController {
     response.setHeader("Cache-Control", "private, max-age=3600");
     response.setHeader(
       "Content-Disposition",
-      `${disposition}; filename="${downloadFilename(object.contentType)}"`,
+      `${disposition}; filename="${downloadFilename(object.contentType, object.key)}"`,
     );
 
     if (object.contentLength) {
@@ -34,10 +34,11 @@ export class TotemAssetsController {
   }
 }
 
-function downloadFilename(contentType: string): string {
-  if (contentType === "application/pdf") return "TOTEM-ANCESTRAL-Parchemin.pdf";
-  if (contentType.startsWith("audio/")) return "TOTEM-ANCESTRAL-Recit-Sacre.mp3";
-  if (contentType === "image/jpeg") return "TOTEM-ANCESTRAL-Oeuvre.jpg";
-  if (contentType.startsWith("image/")) return "TOTEM-ANCESTRAL-Oeuvre.png";
+function downloadFilename(contentType: string, key: string): string {
+  if (contentType === "application/pdf") return /\/certificate-[^/]+\.pdf$/i.test(key)
+    ? "TOTEM-ANCESTRAL-Certificat.pdf" : "TOTEM-ANCESTRAL-Carte-Ancestrale.pdf";
+  if (contentType.startsWith("audio/")) return "TOTEM-ANCESTRAL-La-Voix-de-l-Ancetre.mp3";
+  if (contentType === "image/jpeg") return "TOTEM-ANCESTRAL-Totem.jpg";
+  if (contentType.startsWith("image/")) return "TOTEM-ANCESTRAL-Totem.png";
   return "TOTEM-ANCESTRAL-Fichier";
 }

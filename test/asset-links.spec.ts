@@ -2,6 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { TotemAssetLinksService } from "../src/totem/totem-asset-links.service";
 import { SupabaseStorageService } from "../src/totem/supabase-storage.service";
 import { TotemOrdersController } from "../src/totem/totem-orders.controller";
+import { TotemAssetsController } from "../src/totem/totem-assets.controller";
+
+describe("delivery download names", () => {
+  it.each([
+    ["application/pdf", "orders/order-1/pdf-123.pdf", "Carte-Ancestrale.pdf"],
+    ["application/pdf", "orders/order-1/certificate-123.pdf", "Certificat.pdf"],
+    ["audio/mpeg", "orders/order-1/audio-123.mp3", "La-Voix-de-l-Ancetre.mp3"],
+    ["image/png", "orders/order-1/image-123.png", "Totem.png"],
+  ])("names %s downloads for their actual deliverable", async (contentType, key, suffix) => {
+    const storage = { readSignedObject: vi.fn().mockResolvedValue({ contentType, key, body: { pipe: vi.fn() } }) };
+    const response = { setHeader: vi.fn() };
+    await new TotemAssetsController(storage as never).read("signed", "1", undefined, response as never);
+    expect(response.setHeader).toHaveBeenCalledWith("Content-Disposition", `attachment; filename="TOTEM-ANCESTRAL-${suffix}"`);
+  });
+});
 
 const mocks = vi.hoisted(() => ({ download: vi.fn() }));
 vi.mock("@supabase/supabase-js", () => ({ createClient: () => ({ storage: { from: () => ({ download: mocks.download }) } }) }));
@@ -30,6 +45,13 @@ beforeEach(() => { vi.clearAllMocks(); mocks.download.mockResolvedValue({ data: 
 const tokenFrom = (url: string) => new URL(url).pathname.split("/totem-assets/")[1]!;
 
 describe("renewable private asset links", () => {
+  it("reads delivery attachments only inside their order directory", async () => {
+    const { storage } = setup();
+    await expect(storage.readOwnedArtefact("order-1", "orders/other/pdf-file.pdf")).rejects.toThrow("artefact_owner_mismatch");
+    await expect(storage.readOwnedArtefact("order-1", "orders/order-1/../other.pdf")).rejects.toThrow("artefact_owner_mismatch");
+    expect(mocks.download).not.toHaveBeenCalled();
+    await expect(storage.readOwnedArtefact("order-1", "orders/order-1/pdf-file.pdf")).resolves.toHaveProperty("bytes");
+  });
   it("renews all four files after the original 30-day link has expired", async () => {
     const s = setup();
     const realNow = Date.now();
