@@ -15,7 +15,7 @@ function setup(patch: Partial<TotemOrder> = {}) {
       findUniqueOrThrow: vi.fn(async () => ({ ...row })),
       findUnique: vi.fn(async () => ({ ...row })),
       findMany: vi.fn(async () => [{ id: row.id }]),
-      update: vi.fn(async ({ data }) => { Object.assign(row, data); return { ...row }; }),
+      update: vi.fn(async ({ data }) => { const { attempts, ...rest } = data; if (attempts?.increment) row.attempts += attempts.increment; Object.assign(row, rest); return { ...row }; }),
       updateMany: vi.fn(async ({ where, data }) => {
         if (where.OR) {
           const stale = row.status === "processing" && row.processingAt
@@ -46,14 +46,17 @@ function setup(patch: Partial<TotemOrder> = {}) {
   const storage = { store: vi.fn(async (_id: string, kind: string) => ({ key: kind, url: `https://example.invalid/${kind}` })) };
   const mirror = { markProcessing: vi.fn(async () => {}), markFailed: vi.fn(async () => {}), markDelivered: vi.fn(async () => {}) };
   const mailer = { sendFailureAlert: vi.fn(async () => {}), sendDelivery: vi.fn(async () => true) };
+  const junior = { computeJuniorRevealIfNeeded: vi.fn(async (_id: string, context: { assertLease: () => Promise<void> }) => {
+    await context.assertLease(); row.status = TotemOrderStatus.done; row.deliveryEmailSentAt = new Date();
+  }) };
   const worker = new TotemWorker(prisma as never, queue as never, generation as never, storage as never,
-    mirror as never, mailer as never, { get: () => undefined } as never);
+    mirror as never, mailer as never, { get: () => undefined } as never, junior as never);
   const internal = worker as unknown as {
     process(job: TotemJob): Promise<void>; recoverPending(): Promise<void>;
     persistClaim(id: string, date: Date, data: object): Promise<void>;
     running: boolean; poll(): Promise<void>;
   };
-  return { row, prisma, queue, generation, mirror, mailer, worker, internal };
+  return { row, prisma, queue, generation, mirror, mailer, worker, internal, junior };
 }
 afterEach(() => { vi.useRealTimers(); });
 
@@ -178,7 +181,7 @@ describe("worker recovery and ownership", () => {
     const s = setup();
     await s.internal.recoverPending();
     expect(s.prisma.totemOrder.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { status: "pending", queuedAt: { not: null }, offer: { not: "junior" } },
+      where: expect.objectContaining({ queuedAt: { not: null }, OR: expect.arrayContaining([{ status: "pending" }]) }),
     }));
     expect(s.queue.enqueue).toHaveBeenCalledWith("order");
   });
@@ -194,4 +197,53 @@ describe("worker recovery and ownership", () => {
     await processing;
     expect(vi.getTimerCount()).toBe(0);
   });
+});
+
+describe("durable Junior worker", () => {
+  it("processes a paid Junior with the Junior pipeline and acknowledges only afterwards", async () => {
+    const s = setup({ offer: "junior", paymentIntentId: "pi_paid" });
+    await s.internal.process(job);
+    expect(s.junior.computeJuniorRevealIfNeeded).toHaveBeenCalledOnce();
+    expect(s.junior.computeJuniorRevealIfNeeded).toHaveBeenCalledWith("order", expect.objectContaining({ processingAt: expect.any(Date), assertLease: expect.any(Function) }));
+    expect(s.generation.generateText).not.toHaveBeenCalled();
+    expect(s.queue.ack).toHaveBeenCalledOnce();
+    expect(s.row.attempts).toBe(1);
+  });
+  it("does not process an unpaid or unreserved Junior", async () => {
+    for (const patch of [{ paymentIntentId: null }, { paymentIntentId: "pi", queuedAt: null }]) {
+      const s = setup({ offer: "junior", ...patch }); await s.internal.process(job);
+      expect(s.junior.computeJuniorRevealIfNeeded).not.toHaveBeenCalled();
+    }
+  });
+  it("retries Junior generation and stops after three failures", async () => {
+    const s = setup({ offer: "junior", paymentIntentId: "pi" });
+    s.junior.computeJuniorRevealIfNeeded.mockRejectedValue(Error("image_failed"));
+    for (let i = 0; i < 3; i++) await s.internal.process(job);
+    expect(s.row.status).toBe("error"); expect(s.row.attempts).toBe(3);
+    expect(s.queue.retry).toHaveBeenCalledTimes(2); expect(s.queue.ack).toHaveBeenCalledOnce();
+    expect(s.mailer.sendFailureAlert).toHaveBeenCalledOnce();
+  });
+  it("resumes delivery for a completed Junior and skips an already sent delivery", async () => {
+    const s = setup({ offer: "junior", paymentIntentId: "pi", status: TotemOrderStatus.done, pdfKey: "pdf", certificateKey: "cert", deliveryEmailSentAt: null });
+    s.junior.computeJuniorRevealIfNeeded.mockRejectedValueOnce(Error("email_down"));
+    await s.internal.process(job); expect(s.queue.retry).toHaveBeenCalledOnce();
+    await s.internal.process(job); await s.internal.process(job);
+    expect(s.junior.computeJuniorRevealIfNeeded).toHaveBeenCalledTimes(2);
+    expect(s.generation.generateText).not.toHaveBeenCalled();
+  });
+  it("retries after a crash with a stale processing reservation", async () => {
+    const s = setup({ offer: "junior", paymentIntentId: "pi", status: TotemOrderStatus.processing,
+      processingAt: new Date(Date.now() - TOTEM_QUEUE_STALE_MS - 1000), attempts: 1 });
+    await s.internal.process(job);
+    expect(s.row.attempts).toBe(2); expect(s.junior.computeJuniorRevealIfNeeded).toHaveBeenCalledOnce();
+  });
+});
+
+it("alerts and stops a Junior delivery after its final allowed failure", async () => {
+  const s = setup({ offer: "junior", paymentIntentId: "pi", status: TotemOrderStatus.done,
+    pdfKey: "pdf", certificateKey: "cert", deliveryEmailSentAt: null, attempts: 2 });
+  s.junior.computeJuniorRevealIfNeeded.mockRejectedValue(Error("mail_down"));
+  await s.internal.process(job);
+  expect(s.queue.retry).not.toHaveBeenCalled(); expect(s.queue.ack).toHaveBeenCalledOnce();
+  expect(s.mailer.sendFailureAlert).toHaveBeenCalledOnce();
 });

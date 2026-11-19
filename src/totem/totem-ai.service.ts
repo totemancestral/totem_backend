@@ -96,12 +96,9 @@ export class TotemAiService {
   private readonly anthropicModel: string;
   private readonly openAiApiKey: string;
   private readonly openAiImageModel: string;
-  private readonly openAiTtsModel: string;
-  private readonly openAiTtsVoice: string;
   private readonly elevenLabsApiKey?: string;
-  private readonly elevenLabsVoiceId?: string;
+  private readonly elevenLabsVoiceId: string;
   private readonly elevenLabsModelId: string;
-  private readonly imoleApiKey?: string;
   private readonly storyPageCount: number;
 
   constructor(config: ConfigService) {
@@ -109,12 +106,9 @@ export class TotemAiService {
     this.anthropicModel = config.getOrThrow<string>("ANTHROPIC_MODEL");
     this.openAiApiKey = config.getOrThrow<string>("OPENAI_API_KEY");
     this.openAiImageModel = config.getOrThrow<string>("OPENAI_IMAGE_MODEL");
-    this.openAiTtsModel = config.getOrThrow<string>("OPENAI_TTS_MODEL");
-    this.openAiTtsVoice = config.getOrThrow<string>("OPENAI_TTS_VOICE");
     this.elevenLabsApiKey = config.get<string>("ELEVENLABS_API_KEY");
-    this.elevenLabsVoiceId = config.get<string>("ELEVENLABS_VOICE_ID");
+    this.elevenLabsVoiceId = config.get<string>("ELEVENLABS_VOICE_ID") || "RmoPMgQUNbqVyHmDrfhA";
     this.elevenLabsModelId = config.get<string>("ELEVENLABS_MODEL_ID") ?? "eleven_v3";
-    this.imoleApiKey = config.get<string>("IMOLE_API_KEY");
     this.storyPageCount = Math.min(config.get<number>("TOTEM_STORY_PAGE_COUNT") ?? 5, 5);
   }
 
@@ -227,235 +221,35 @@ export class TotemAiService {
     throw new Error("openai_image_payload_missing");
   }
 
-  private cachedGriotVoiceId?: string;
-
   async generateAudio(payload: AudioRequest): Promise<GeneratedArtefact> {
-    if (this.imoleApiKey) {
-      try {
-        return await this.generateAudioImole(payload);
-      } catch (error) {
-        console.error(
-          `[Imole API] Audio generation failed, falling back: ${error instanceof Error ? error.message : error}`,
-        );
-      }
-    }
-
-    if (this.elevenLabsApiKey) {
-      try {
-        return await this.generateAudioElevenLabs(payload);
-      } catch (error) {
-        console.error(
-          `[ElevenLabs] Audio generation failed, falling back to OpenAI TTS: ${error instanceof Error ? error.message : error}`,
-        );
-      }
-    }
-
-    return this.generateAudioOpenAi(payload);
-  }
-
-  private async generateAudioImole(payload: AudioRequest): Promise<GeneratedArtefact> {
-    const voiceId = this.elevenLabsVoiceId || (await this.resolveGriotVoiceId());
-    const response = await fetchWithTimeout(
-      "https://api.imole.app/v1/audio/speech",
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${this.imoleApiKey!}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: this.elevenLabsModelId || "eleven_v3",
-          input: payload.text,
-          voice_id: voiceId,
-          output_format: "mp3_44100_128",
-          language_code: payload.locale?.startsWith("en") ? "en" : "fr",
-          stability: 0.35,
-          similarity_boost: 0.85,
-        }),
-      },
-      180_000,
-    );
-
-    await assertOk(response, "imole_audio");
-    return {
-      bytes: Buffer.from(await response.arrayBuffer()),
-      contentType: "audio/mpeg",
-      extension: "mp3",
-    };
-  }
-
-  private async generateAudioElevenLabs(payload: AudioRequest): Promise<GeneratedArtefact> {
-    const voiceId = await this.resolveGriotVoiceId();
-    const response = await fetchWithTimeout(
-      `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": this.elevenLabsApiKey!,
-          "Content-Type": "application/json",
-          Accept: "audio/mpeg",
-        },
-        body: JSON.stringify({
-          text: payload.text,
-          model_id: this.elevenLabsModelId,
-          voice_settings: {
-            stability: 0.35,
-            similarity_boost: 0.85,
-            style: 0.45,
-            use_speaker_boost: true,
-          },
-        }),
-      },
-      180_000,
-    );
-
-    await assertOk(response, "elevenlabs_audio");
-    return {
-      bytes: Buffer.from(await response.arrayBuffer()),
-      contentType: "audio/mpeg",
-      extension: "mp3",
-    };
-  }
-
-  private async resolveGriotVoiceId(): Promise<string> {
-    if (this.elevenLabsVoiceId) {
-      return this.elevenLabsVoiceId;
-    }
-
-    if (this.cachedGriotVoiceId) {
-      return this.cachedGriotVoiceId;
-    }
-
-    // 1. Chercher si une voix nommée Griot ou Ancestral existe déjà sur le compte
-    try {
-      const listResponse = await fetchWithTimeout(
-        "https://api.elevenlabs.io/v1/voices",
-        {
-          headers: {
-            "xi-api-key": this.elevenLabsApiKey!,
-          },
-        },
-        30_000,
-      );
-
-      if (listResponse.ok) {
-        const data = (await listResponse.json()) as { voices?: Array<{ voice_id: string; name: string }> };
-        const existingVoice = data.voices?.find(
-          (v) =>
-            v.name.toLowerCase().includes("griot") ||
-            v.name.toLowerCase().includes("ancestral"),
-        );
-        if (existingVoice?.voice_id) {
-          this.cachedGriotVoiceId = existingVoice.voice_id;
-          return existingVoice.voice_id;
-        }
-      }
-    } catch {
-      // Continuer vers la création automatique
-    }
-
-    // 2. Création automatique de la voix de Griot Ancestral via l'API Voice Design d'ElevenLabs
-    try {
-      const designResponse = await fetchWithTimeout(
-        "https://api.elevenlabs.io/v1/voice-generation/generate-voice",
-        {
-          method: "POST",
-          headers: {
-            "xi-api-key": this.elevenLabsApiKey!,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            gender: "male",
-            accent: "african",
-            age: "old",
-            accent_strength: 1.4,
-            text: "Au commencement des terres anciennes, le souffle du vent portait la memoire des ancetres et des rois.",
-          }),
-        },
-        60_000,
-      );
-
-      if (designResponse.ok) {
-        const generationId =
-          designResponse.headers.get("generated_voice_id") ??
-          ((await designResponse.json().catch(() => ({}))) as { generated_voice_id?: string })
-            ?.generated_voice_id;
-
-        if (generationId) {
-          const createResponse = await fetchWithTimeout(
-            "https://api.elevenlabs.io/v1/voice-generation/create-voice",
-            {
-              method: "POST",
-              headers: {
-                "xi-api-key": this.elevenLabsApiKey!,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({
-                voice_name: "Griot Ancestral",
-                voice_description:
-                  "Voix profonde, sage et chaleureuse d'un ancien griot africain narrant le recit ancestral.",
-                generated_voice_id: generationId,
-              }),
-            },
-            60_000,
-          );
-
-          if (createResponse.ok) {
-            const createdData = (await createResponse.json()) as { voice_id?: string };
-            if (createdData.voice_id) {
-              this.cachedGriotVoiceId = createdData.voice_id;
-              return createdData.voice_id;
-            }
-          }
-        }
-      }
-    } catch (error) {
-      console.warn(
-        `[ElevenLabs] Auto voice design creation failed: ${error instanceof Error ? error.message : error}`,
-      );
-    }
-
-    // 3. Fallback sur une voix de conteur masculine grave si la création automatique échoue
-    const fallbackVoiceId = "JBFqnCBsd6RMkjVDRZzb";
-    this.cachedGriotVoiceId = fallbackVoiceId;
-    return fallbackVoiceId;
-  }
-
-  private async generateAudioOpenAi(payload: AudioRequest): Promise<GeneratedArtefact> {
+    // Keep the same narrator as the recorded questions. Provider failures must
+    // reach the worker retry flow instead of silently changing the voice.
+    if (!this.elevenLabsApiKey) throw new Error("elevenlabs_api_key_missing");
     const chunks = chunkTtsText(payload.text, 3600);
     const buffers: Buffer[] = [];
-
-    for (let index = 0; index < chunks.length; index += 1) {
+    for (const text of chunks) {
       const response = await fetchWithTimeout(
-        "https://api.openai.com/v1/audio/speech",
+        `https://api.elevenlabs.io/v1/text-to-speech/${this.elevenLabsVoiceId}?output_format=mp3_44100_128`,
         {
           method: "POST",
           headers: {
-            Authorization: `Bearer ${this.openAiApiKey}`,
+            "xi-api-key": this.elevenLabsApiKey,
             "Content-Type": "application/json",
+            Accept: "audio/mpeg",
           },
           body: JSON.stringify({
-            model: this.openAiTtsModel,
-            voice: this.openAiTtsVoice,
-            input: chunks[index],
-            instructions: payload.locale?.startsWith("en")
-              ? "A deep, slow, warm and composed voice. Clear diction, careful articulation and natural English pronunciation. Short breaths and deliberate pauses after strong sentences. Let silence carry the meaning without emphasis or theatrical effects."
-              : "Voix grave, lente, chaleureuse et posée. Diction nette, articulation soignée, prononciation française naturelle, respirations courtes et pauses marquées après les phrases fortes. Laisser le silence porter le sens sans emphase ni effet théâtral.",
-            response_format: "mp3",
+            text,
+            model_id: this.elevenLabsModelId,
+            language_code: payload.locale?.startsWith("en") ? "en" : "fr",
+            voice_settings: { stability: 0.5 },
           }),
         },
-        240_000,
+        180_000,
       );
-
-      await assertOk(response, `openai_audio_${index + 1}`);
+      await assertOk(response, "elevenlabs_audio");
       buffers.push(Buffer.from(await response.arrayBuffer()));
     }
-
-    return {
-      bytes: Buffer.concat(buffers),
-      contentType: "audio/mpeg",
-      extension: "mp3",
-    };
+    return { bytes: Buffer.concat(buffers), contentType: "audio/mpeg", extension: "mp3" };
   }
 
   async generatePdf(payload: PdfRequest): Promise<GeneratedArtefact> {

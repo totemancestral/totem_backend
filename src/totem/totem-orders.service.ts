@@ -69,8 +69,8 @@ export class TotemOrdersService {
     }
 
     if (order.offer === "junior" && (order.status !== TotemOrderStatus.done || !order.pdfKey || !order.certificateKey || (order.parentConsentId && !order.deliveryEmailSentAt))) {
-      await this.webhook.computeJuniorRevealIfNeeded(order.id).catch((err) =>
-        console.warn("[TotemOrdersService] computeJuniorRevealIfNeeded warning:", err),
+      await this.webhook.enqueueJuniorIfNeeded(order.id).catch((err) =>
+        console.warn("[TotemOrdersService] enqueueJuniorIfNeeded warning:", err),
       );
       order = (await this.prisma.totemOrder.findUnique({ where: { id: order.id } })) ?? order;
     }

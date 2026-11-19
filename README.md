@@ -9,7 +9,7 @@ Backend de production de TOTEM Ancestral. Il gere Stripe, une file Redis crash-s
 - File Redis Upstash REST (`@upstash/redis`) : LPUSH + LMOVE vers `processing` + ACK apres persist. Pas de BullMQ (Upstash n'expose pas le protocole Redis TCP).
 - Stripe Checkout + webhooks (`stripe` v20, aligne sur le frontend).
 - Anthropic pour la generation editoriale.
-- OpenAI Images et TTS pour les visuels et l'audio.
+- OpenAI Images pour les visuels ; ElevenLabs pour la voix de l'ancêtre.
 - pdf-lib pour le parchemin PDF multi-page.
 - Supabase Storage pour les artefacts prives.
 - Resend pour les emails de livraison et alertes.
@@ -54,7 +54,7 @@ src/totem/feta-scoring.ts           Scoring FETA (copie du frontend)
 src/totem/stripe-webhook.*          Verification et traitement webhooks Stripe
 src/totem/totem-queue.service.ts    File Redis crash-safe (LMOVE/ACK)
 src/totem/totem.worker.ts           Worker de polling du pipeline
-src/totem/totem-ai.service.ts       Anthropic, OpenAI image/TTS, PDF
+src/totem/totem-ai.service.ts       Anthropic, OpenAI Images, ElevenLabs, PDF
 src/totem/supabase-storage.service.ts Stockage et signature des artefacts
 src/totem/supabase-mirror.service.ts  Miroir vers tables Supabase frontend
 src/totem/resend-mailer.service.ts  Emails livraison/alertes
@@ -122,6 +122,32 @@ RESEND_SENDER_EMAIL=livraison@example.com
 RESEND_SENDER_NAME=TOTEM ANCESTRAL
 ALERT_EMAIL=tech@example.com
 ```
+
+### Paiement et livraison Junior
+
+Le webhook vérifie et enregistre le paiement puis réserve la commande Junior
+en base (`queuedAt`) et dans la file Redis. Il ne génère ni image ni PDF et
+n'envoie pas l'e-mail de livraison dans la requête Stripe. Le worker consomme
+la même file que pour les adultes, avec un traitement Junior distinct.
+La réservation en base permet de réparer une insertion Redis échouée ; les
+travaux interrompus sont récupérés avec leur bail. Les tentatives sont bornées
+à trois, puis une alerte est envoyée. L'image sauvegardée est réutilisée après
+un échec PDF et les PDF prêts sont réutilisés après un échec d'e-mail.
+La lecture du suivi ne déclenche plus de génération synchrone.
+Cette évolution ne demande pas de migration de base ni de nouvelle variable.
+
+### Voix de l'ancêtre
+
+La narration utilise ElevenLabs directement : voix **Djou song**
+(`RmoPMgQUNbqVyHmDrfhA`), modèle `eleven_v3`, stabilité `0.5`, comme les
+enregistrements des questions. Configurer `ELEVENLABS_API_KEY`,
+`ELEVENLABS_VOICE_ID=RmoPMgQUNbqVyHmDrfhA` et
+`ELEVENLABS_MODEL_ID=eleven_v3` sur le backend déployé aussi.
+Les histoires longues sont découpées en segments de 3 600 caractères maximum.
+Aucun basculement vers OpenAI, Imole ou une voix créée automatiquement n'est
+effectué : un échec remonte au traitement de la commande pour sa relance.
+Les anciennes variables OpenAI TTS et Imole ne pilotent plus la narration.
+Les MP3 de questions et les audios déjà livrés ne sont pas régénérés.
 
 Notes:
 

@@ -9,6 +9,7 @@ import { TotemAiService } from "./totem-ai.service";
 import { TotemJob, TotemQueueService, TOTEM_QUEUE_STALE_MS } from "./totem-queue.service";
 import { TotemTextPayload } from "./totem.types";
 import { extractAdultAnswers } from "./adult-answers";
+import { StripeWebhookService } from "./stripe-webhook.service";
 import { TOTEM_ANIMALS } from "./totem-animals";
 
 @Injectable()
@@ -30,6 +31,7 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
     private readonly mirror: SupabaseMirrorService,
     private readonly mailer: ResendMailerService,
     config: ConfigService,
+    private readonly junior: StripeWebhookService,
   ) {
     this.pollIntervalMs = config.get<number>("TOTEM_POLL_INTERVAL_MS") ?? 3_000;
     this.concurrency = Math.min(
@@ -81,7 +83,14 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
 
   private async recoverPending(): Promise<void> {
     const orders = await this.prisma.totemOrder.findMany({
-      where: { status: TotemOrderStatus.pending, queuedAt: { not: null }, offer: { not: "junior" } },
+      where: { queuedAt: { not: null }, OR: [
+        { status: TotemOrderStatus.pending },
+        { status: TotemOrderStatus.processing, processingAt: { lte: new Date(Date.now() - TOTEM_QUEUE_STALE_MS) } },
+        { offer: "junior", status: TotemOrderStatus.done, pdfKey: null, attempts: { lt: 3 } },
+        { offer: "junior", status: TotemOrderStatus.done, certificateKey: null, attempts: { lt: 3 } },
+        { offer: "junior", status: TotemOrderStatus.done, deliveryEmailSentAt: null,
+          parentConsentId: { not: null }, attempts: { lt: 3 } },
+      ] },
       orderBy: { updatedAt: "asc" }, take: 100, select: { id: true },
     });
     for (const order of orders) await this.queue.enqueue(order.id);
@@ -107,7 +116,27 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
         where: { id: job.orderId },
       });
       await assertLease();
-      if (order.status === TotemOrderStatus.done) {
+      if (order.offer === "junior" && (!order.queuedAt || !order.paymentIntentId)) {
+        await this.queue.ack(job);
+        return;
+      }
+      if (order.status === TotemOrderStatus.done && !(order.offer === "junior" && (!order.pdfKey || !order.certificateKey))) {
+        if (order.offer === "junior" && !order.deliveryEmailSentAt && order.attempts < 3) {
+          await this.prisma.totemOrder.update({ where: { id: order.id }, data: { attempts: { increment: 1 } } });
+          try {
+            await this.junior.computeJuniorRevealIfNeeded(order.id, { assertLease });
+          } catch (error) {
+            await assertLease();
+            await this.prisma.totemPipelineError.create({ data: {
+              orderId: order.id, step: "email", message: normalizeError(error), attempts: order.attempts + 1,
+            } });
+            if (order.attempts + 1 >= 3) {
+              await this.mailer.sendFailureAlert(order.id, normalizeError(error)).catch(() => undefined);
+              await this.queue.ack(job);
+            } else await this.queue.retry(job);
+            return;
+          }
+        }
         if (order.offer !== "junior") {
           await this.restoreDelivery(order);
           await assertLease();
@@ -116,7 +145,7 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
         await this.queue.ack(job);
         return;
       }
-      if (order.offer === "junior" || order.status === TotemOrderStatus.error || !order.queuedAt) {
+      if (order.status === TotemOrderStatus.error || !order.queuedAt) {
         await this.queue.ack(job);
         return;
       }
@@ -135,6 +164,10 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
       const claimed = await this.prisma.totemOrder.updateMany({
         where: { id: order.id, OR: [
           { status: TotemOrderStatus.pending },
+          ...(order.offer === "junior" ? [
+            { status: TotemOrderStatus.done, pdfKey: null },
+            { status: TotemOrderStatus.done, certificateKey: null },
+          ] : []),
           { status: TotemOrderStatus.processing, processingAt: { lte: new Date(Date.now() - TOTEM_QUEUE_STALE_MS) } },
         ] },
         data: {
@@ -149,7 +182,11 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
         await this.queue.retry(job);
         return;
       }
-      await this.generate(order, processingAt, assertLease);
+      if (order.offer === "junior") {
+        await this.junior.computeJuniorRevealIfNeeded(order.id, { processingAt, assertLease });
+      } else {
+        await this.generate(order, processingAt, assertLease);
+      }
       await this.queue.ack(job);
     } catch (error) {
       // Sans propriétaire ou sans persistance de l'échec, la tâche reste récupérable.
@@ -312,7 +349,13 @@ export class TotemWorker implements OnModuleInit, OnModuleDestroy {
 
     const order = await this.prisma.totemOrder.findUnique({ where: { id: orderId } });
     if (!order || order.processingAt?.getTime() !== processingAt.getTime()) return "lost";
-    if (order.status === TotemOrderStatus.done) return "retry";
+    if (order.status === TotemOrderStatus.done) {
+      if (order.offer === "junior" && order.attempts >= 3) {
+        await this.mailer.sendFailureAlert(orderId, message).catch(() => undefined);
+        return "ack";
+      }
+      return "retry";
+    }
     const attempts = order.attempts;
     const maxAttempts = 3;
     const finalAttempt = attempts >= maxAttempts;

@@ -28,7 +28,8 @@ describe("delivery language", () => {
     expect(sent.html).toContain("30");
     expect(sent.html).toContain(locale === "en" ? "Ancestral Card (PDF)" : "Carte ancestrale (PDF)");
     expect(sent.html).toContain(locale === "en" ? "The Ancestor’s Voice" : "La voix de l’ancêtre");
-    expect(sent.html).toContain("Totem");
+    expect(sent.html).toContain("TOTEM ANCESTRAL");
+    expect(sent.html).not.toContain(delivery(locale).imageUrl);
   });
   it("does not load the French stored template for an English delivery", async () => {
     mocks.template.mockClear().mockImplementation(async locale => ({ data: locale === "fr" ? { subject: "Ancien modèle français", html_content: "Français" } : null, error: null }));
@@ -37,11 +38,12 @@ describe("delivery language", () => {
     expect(mocks.template).toHaveBeenCalledExactlyOnceWith("en");
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body).subject).toBe("Your TOTEM ANCESTRAL box is ready");
   });
-  it("uses and safely interpolates an available localized template", async () => {
+  it("keeps a localized subject while using the approved layout instead of legacy HTML", async () => {
     mocks.template.mockResolvedValue({ data: { subject: "Ready {{orderId}}", html_content: '<div lang="en">{{ancestralName}} <a href="{{pdfUrl}}">PDF</a></div>' }, error: null });
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", fetchMock);
     await new ResendMailerService(config() as never).sendDelivery(delivery("en") as never);
     expect(JSON.parse(fetchMock.mock.calls[0]![1].body)).toMatchObject({ subject: "Ready test-order", html: expect.stringContaining("Name &lt;unsafe&gt;") });
+    expect(JSON.parse(fetchMock.mock.calls[0]![1].body).html).toContain("background:#fffefa");
   });
   it.each(["fr", "en"])("harmonizes legacy %s delivery templates before interpolation", async locale => {
     const oldName = locale === "en" ? "Ancestral Parchment" : "Parchemin ancestral";
@@ -55,21 +57,36 @@ describe("delivery language", () => {
     expect(sent.html).not.toContain(oldName);
     expect(sent.html).toContain("https://example.invalid/pdf");
   });
-  it.each(["fr", "en"])("renames visible %s file links without rewriting URLs or user data", async locale => {
+  it.each(["fr", "en"])("uses the approved %s file rows without rewriting user data", async locale => {
     mocks.template.mockResolvedValue({ data: {
       subject: "{{ancestralName}}",
       html_content: '<p>{{ancestralName}}</p><a href="{{imageUrl}}">Image</a><a href="{{audioUrl}}">Audio</a><a href="{{pdfUrl}}">PDF</a>',
     }, error: null });
     const fetchMock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", fetchMock);
-    const payload = delivery(locale);
+    const payload = { ...delivery(locale), audioUrl: "https://example.invalid/audio" };
     payload.order.ancestralName = "Parchemin ancestral";
     await new ResendMailerService(config() as never).sendDelivery(payload as never);
     const sent = JSON.parse(fetchMock.mock.calls[0]![1].body);
     expect(sent.subject).toBe("Parchemin ancestral");
-    expect(sent.html).toContain(">Totem<");
+    expect(sent.html).not.toContain(payload.imageUrl);
     expect(sent.html).toContain(locale === "en" ? ">The Ancestor’s Voice<" : ">La voix de l’ancêtre<");
     expect(sent.html).toContain(locale === "en" ? ">Ancestral Card (PDF)<" : ">Carte ancestrale (PDF)<");
     expect(sent.html).toContain(payload.pdfUrl);
+  });
+  it("never advertises narration for Origine, even with a stale audio URL", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", fetchMock);
+    await new ResendMailerService(config() as never).sendDelivery({ ...delivery("fr"), order: { ...delivery("fr").order, offer: "origine", amountCents: 2900 }, audioUrl: "https://example.invalid/stale-audio" } as never);
+    const html = JSON.parse(fetchMock.mock.calls[0]![1].body).html;
+    expect(html).toContain("Origine"); expect(html).not.toContain("stale-audio"); expect(html).not.toContain("MP3");
+  });
+  it.each(["fr", "en"])("preserves the private parental link and expiry in the light %s email", async locale => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("{}")); vi.stubGlobal("fetch", fetchMock);
+    await new ResendMailerService(config() as never).sendParentConfirmation({ email: "parent@example.invalid", firstName: "Test <unsafe>", locale, link: `https://example.invalid/${locale}/autorisation-parentale#token=private-token` });
+    const sent = JSON.parse(fetchMock.mock.calls[0]![1].body);
+    expect(sent.to).toEqual(["parent@example.invalid"]);
+    expect(sent.html).toContain("#token=private-token"); expect(sent.html).toContain("24");
+    expect(sent.html).toContain("Test &lt;unsafe&gt;"); expect(sent.html).toContain("background:#fffefa");
+    expect(sent.html).not.toContain("Test <unsafe>"); expect(sent.html).not.toContain("MP3");
   });
   it("keeps Junior scoring and identity codes stable while translating its delivery content", () => {
     const answers = Object.fromEntries(Array.from({ length: 5 }, (_, i) => [String(i + 1), { choice: "A" }]));
@@ -123,16 +140,36 @@ describe("PDF and narration language", () => {
     expect(texts.join("\n")).toContain(locale === "en" ? "Order: TEST" : "Commande: TEST");
     if (locale === "en") expect(texts.join("\n")).not.toContain("Commande:");
   }, 20_000);
-  it.each(["fr", "en"])("passes %s pronunciation instructions to the fallback narrator", async locale => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2]))); vi.stubGlobal("fetch", fetchMock);
-    await new TotemAiService(config() as never).generateAudio({ orderId: "test", archetypeId: "lion", text: "Test narration", locale });
+  it.each(["fr", "en"])("uses the question narrator and original stability for %s", async locale => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2])));
+    vi.stubGlobal("fetch", fetchMock);
+    await new TotemAiService(config({ ELEVENLABS_API_KEY: "test" }) as never).generateAudio({ orderId: "test", archetypeId: "lion", text: "Test narration", locale });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe("https://api.elevenlabs.io/v1/text-to-speech/RmoPMgQUNbqVyHmDrfhA?output_format=mp3_44100_128");
     const sent = JSON.parse(fetchMock.mock.calls[0]![1].body);
-    expect(sent.input).toBe("Test narration");
-    expect(sent.instructions).toContain(locale === "en" ? "English pronunciation" : "prononciation française");
+    expect(sent).toEqual({ text: "Test narration", model_id: "eleven_v3", language_code: locale, voice_settings: { stability: 0.5 } });
   });
-  it("passes English to the primary narrator instead of forcing French", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(new Uint8Array([1, 2]))); vi.stubGlobal("fetch", fetchMock);
-    await new TotemAiService(config({ IMOLE_API_KEY: "test", ELEVENLABS_VOICE_ID: "test-voice" }) as never).generateAudio({ orderId: "test", archetypeId: "lion", text: "Test narration", locale: "en" });
-    expect(JSON.parse(fetchMock.mock.calls[0]![1].body).language_code).toBe("en");
+  it("propagates ElevenLabs failure without switching narrator or provider", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(new TotemAiService(config({ ELEVENLABS_API_KEY: "test", IMOLE_API_KEY: "test" }) as never).generateAudio({ orderId: "test", archetypeId: "lion", text: "Test" })).rejects.toThrow();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toContain("api.elevenlabs.io");
+  });
+  it("refuses missing credentials instead of producing a different voice", async () => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    await expect(new TotemAiService(config() as never).generateAudio({ orderId: "test", archetypeId: "lion", text: "Test" })).rejects.toThrow("elevenlabs_api_key_missing");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it("splits long stories within the model limit and retains the same voice", async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(new Uint8Array([1, 2])));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await new TotemAiService(config({ ELEVENLABS_API_KEY: "test" }) as never).generateAudio({ orderId: "test", archetypeId: "lion", text: "A long ancestral story. ".repeat(400), locale: "en" });
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+    for (const [url, options] of fetchMock.mock.calls) {
+      expect(url).toContain("RmoPMgQUNbqVyHmDrfhA");
+      expect(JSON.parse(options.body).text.length).toBeLessThanOrEqual(3600);
+    }
+    expect(result.bytes.length).toBe(fetchMock.mock.calls.length * 2);
   });
 });

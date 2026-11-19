@@ -58,7 +58,7 @@ describe("readiness", () => {
 
   it("worker availability follows its lifecycle without requiring an empty queue", () => {
     vi.useFakeTimers();
-    const worker = new TotemWorker({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, { get: () => undefined } as never);
+    const worker = new TotemWorker({} as never, {} as never, {} as never, {} as never, {} as never, {} as never, { get: () => undefined } as never, {} as never);
     expect(worker.isAvailable()).toBe(false);
     worker.onModuleInit();
     expect(worker.isAvailable()).toBe(true);

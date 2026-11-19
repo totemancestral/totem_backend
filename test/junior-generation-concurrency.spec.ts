@@ -10,7 +10,7 @@ function setup() {
   const row = {
     id: "junior-order", userId: "user", offer: "junior", status: "pending", processingAt: null as Date | null,
     createdAt: new Date("2026-11-17"), customerEmail: "parent@example.invalid", deliveryEmailSentAt: null,
-    parentConsentId: "confirmed-parent" as string | null,
+    parentConsentId: "confirmed-parent" as string | null, imageKey: null as string | null,
     answers: Object.fromEntries(Array.from({ length: 5 }, (_, i) => [String(i + 1), { choice: "A" }])),
   };
   const prisma = {
@@ -110,5 +110,26 @@ describe("junior generation reservation", () => {
     expect(s.storage.store.mock.calls.map(call => call[1])).toEqual(["pdf", "certificate"]);
     expect(s.mailer.sendJuniorDelivery).not.toHaveBeenCalled();
     expect(s.row.status).toBe("done");
+  });
+});
+
+describe("Junior background recovery", () => {
+  it("reuses a saved image when document storage fails before publication", async () => {
+    const s = setup();
+    s.storage.store.mockImplementationOnce(async () => ({ key: "image", url: "https://example.invalid/image" }))
+      .mockImplementationOnce(async () => { throw Error("pdf_down"); });
+    await expect(s.service.computeJuniorRevealIfNeeded("junior-order")).rejects.toThrow("pdf_down");
+    expect(s.row.imageKey).toBe("image");
+    await s.service.computeJuniorRevealIfNeeded("junior-order");
+    expect(s.generation.generateImage).toHaveBeenCalledOnce();
+    expect(s.row.status).toBe("done");
+  });
+  it("does not publish if a background worker loses its lease", async () => {
+    const s = setup(); const assertLease = vi.fn(async () => { throw Error("worker_lease_lost"); });
+    s.row.status = "processing"; s.row.processingAt = new Date();
+    await expect(s.service.computeJuniorRevealIfNeeded("junior-order", { processingAt: s.row.processingAt, assertLease })).rejects.toThrow("worker_lease_lost");
+    expect(s.mailer.sendJuniorDelivery).not.toHaveBeenCalled();
+    expect(s.mirror.markJuniorDelivered).not.toHaveBeenCalled();
+    expect(s.row.status).toBe("processing");
   });
 });
