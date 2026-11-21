@@ -5,6 +5,7 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 interface SupabaseUser {
   id: string;
   email?: string;
+  parcours?: string;
 }
 
 async function fetchUser(url: string, anonKey: string, token: string): Promise<SupabaseUser> {
@@ -25,7 +26,7 @@ async function fetchUser(url: string, anonKey: string, token: string): Promise<S
     throw new UnauthorizedException('supabase_token_invalid');
   }
 
-  return { id: body.id as string, email: body.email as string | undefined };
+  return { id: body.id as string, email: body.email as string | undefined, parcours: body.user_metadata?.parcours };
 }
 
 function readBearerToken(authorization?: string): string {

@@ -8,6 +8,7 @@ export class ConsultationCaurisService {
   constructor(private readonly prisma: PrismaService) {}
 
   async etat(userId: string, language: "fr" | "en" = "fr") {
+    if (await this.isJunior(userId)) return { accessible: false, reason: "junior_forbidden", currentReading: null };
     const now = new Date();
     const [order, current] = await Promise.all([this.latestAdultOrder(userId), this.currentReading(userId, now)]);
     const currentReading = current ? this.serialize(current, language) : null;
@@ -22,6 +23,7 @@ export class ConsultationCaurisService {
   }
 
   async historique(userId: string, before?: string, language: "fr" | "en" = "fr") {
+    if (await this.isJunior(userId)) throw new ForbiddenException("junior_forbidden");
     const rows = await this.prisma.consultationReading.findMany({
       where: { userId, ...(before ? { weekKey: { lt: before } } : {}) },
       orderBy: { weekKey: "desc" }, take: 21,
@@ -30,6 +32,7 @@ export class ConsultationCaurisService {
   }
 
   async tirer(userId: string, mood?: CaurisMood, language: "fr" | "en" = "fr") {
+    if (await this.isJunior(userId)) throw new ForbiddenException("junior_forbidden");
     const now = new Date();
     const existing = await this.currentReading(userId, now);
     if (existing) return this.drawResponse(existing, now, true, language);
@@ -90,6 +93,11 @@ export class ConsultationCaurisService {
 
   private currentReading(userId: string, now: Date) {
     return this.prisma.consultationReading.findFirst({ where: { userId, weekKey: parisWeekKey(now) } });
+  }
+
+  private async isJunior(userId: string) {
+    const profile = await this.prisma.userProfile.findUnique({ where: { id: userId }, select: { role: true } });
+    return profile?.role === "junior";
   }
 
   private latestAdultOrder(userId: string) {

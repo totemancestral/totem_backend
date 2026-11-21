@@ -1,4 +1,4 @@
-import { BadRequestException, Body, Controller, Get, Headers, Post, Query } from "@nestjs/common";
+import { BadRequestException, Body, Controller, ForbiddenException, Get, Headers, Post, Query } from "@nestjs/common";
 import { z } from "zod";
 import { ConsultationCaurisService } from "./consultation-cauris.service";
 import { SupabaseAuthService } from "./supabase-auth.service";
@@ -17,12 +17,14 @@ export class ConsultationCaurisController {
   @Get("etat")
   async etat(@Headers("authorization") authorization?: string, @Headers("accept-language") language?: string) {
     const user = await this.auth.requireUser(authorization);
+    if (user.parcours === "junior") return { accessible: false, reason: "junior_forbidden", currentReading: null };
     return this.consultations.etat(user.id, this.language(language));
   }
 
   @Post("tirer")
   async tirer(@Body() body: unknown, @Headers("authorization") authorization?: string, @Headers("accept-language") language?: string) {
     const user = await this.auth.requireUser(authorization);
+    if (user.parcours === "junior") throw new ForbiddenException("junior_forbidden");
     const payload = this.readBody(body);
     return this.consultations.tirer(user.id, payload.mood, this.language(language));
   }
@@ -30,6 +32,7 @@ export class ConsultationCaurisController {
   @Get("historique")
   async historique(@Headers("authorization") authorization?: string, @Query("before") before?: string, @Headers("accept-language") language?: string) {
     const user = await this.auth.requireUser(authorization);
+    if (user.parcours === "junior") throw new ForbiddenException("junior_forbidden");
     if (before && !/^\d{4}-\d{2}-\d{2}$/.test(before)) throw new BadRequestException("invalid_cursor");
     return this.consultations.historique(user.id, before, this.language(language));
   }

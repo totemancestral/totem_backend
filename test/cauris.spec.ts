@@ -21,7 +21,7 @@ function setup(initial: Row[] = []) {
   const rows = [...initial]; let profileExists = false;
   const prisma = {
     totemOrder: { findFirst: vi.fn().mockResolvedValue(order) },
-    userProfile: { upsert: vi.fn(async () => { profileExists = true; return {}; }) },
+    userProfile: { findUnique: vi.fn().mockResolvedValue(null), upsert: vi.fn(async () => { profileExists = true; return {}; }) },
     consultationReading: {
       findFirst: vi.fn(async ({ where }) => rows.find((r) => r.userId === where.userId && r.weekKey === where.weekKey) ?? null),
       findMany: vi.fn(async ({ where, take }) => rows.filter((r) => r.userId === where.userId && (!where.weekKey || r.weekKey < where.weekKey.lt)).sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).slice(0, take)),
@@ -42,6 +42,16 @@ beforeEach(() => { vi.useFakeTimers(); vi.setSystemTime(now); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("weekly cauris service", () => {
+  it("denies juniors before reading existing consultations or creating a draw, even with an adult order", async () => {
+    const { service, prisma } = setup([reading()]);
+    prisma.userProfile.findUnique.mockResolvedValue({ role: "junior" });
+    expect(await service.etat("user-1")).toEqual({ accessible: false, reason: "junior_forbidden", currentReading: null });
+    await expect(service.historique("user-1")).rejects.toThrow("junior_forbidden");
+    await expect(service.tirer("user-1")).rejects.toThrow("junior_forbidden");
+    expect(prisma.consultationReading.findFirst).not.toHaveBeenCalled();
+    expect(prisma.consultationReading.findMany).not.toHaveBeenCalled();
+    expect(prisma.consultationReading.create).not.toHaveBeenCalled();
+  });
   it("switches language without drawing again, changing mood or changing weekly availability", async () => {
     const { service, prisma, rows } = setup();
     const first = await service.tirer("user-1", "en_doute", "en");
