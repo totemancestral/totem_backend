@@ -1,11 +1,11 @@
 /**
  * Source de vérité unique du catalogue côté backend.
- * Origine 29 €, Révélation/Ancestral 49 €, Junior 9,99 €.
+ * Origine 29,72 €, Révélation/Ancestral 38,40 €, Junior 9,99 €.
  * Le tarif Famille est conservé pour la lecture des commandes historiques.
  */
 export const TOTEM_PRICES_CENTS = {
-  origine: 2900,
-  ancestral: 4900,
+  origine: 2972,
+  ancestral: 3840,
   famille: 21900,
   junior: 999,
 } as const;

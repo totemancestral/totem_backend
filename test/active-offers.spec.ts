@@ -26,7 +26,7 @@ beforeEach(() => {
 });
 
 describe("active adult offers", () => {
-  it.each([["origine", 2900], ["ancestral", 4900]])("charges and persists %s at %s cents", async (offer, amount) => {
+  it.each([["origine", 2972], ["ancestral", 3840]])("charges and persists %s at %s cents", async (offer, amount) => {
     const { service, tx } = fixture();
     await service.createSession({ userId: "owner", body: { offer, answers } });
     expect(create.mock.calls[0]?.[0].line_items[0].price_data.unit_amount).toBe(amount);
